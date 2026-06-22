@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model School {
+  id             String   @id @default(cuid()) @db.VarChar(64)
+  name           String   @db.VarChar(190)
+  email          String?  @db.VarChar(190)
+  phone          String?  @db.VarChar(30)
+  city           String?  @db.VarChar(120)
+  address        String?  @db.Text
+  contact_person String?  @db.VarChar(160)
+  status         String   @default("lead") @db.VarChar(40)
+  created_at     DateTime @default(now()) @db.Timestamp(0)
+  updated_at     DateTime @default(now()) @db.Timestamp(0)
+
+  @@map("schools")
+}
+
+model Student {
+  id            String   @id @default(cuid()) @db.VarChar(64)
+  user_id       String?  @db.VarChar(64)
+  name          String   @db.VarChar(160)
+  email         String   @unique(map: "email") @db.VarChar(190)
+  phone         String?  @db.VarChar(30)
+  class_level   String?  @db.VarChar(80)
+  school_name   String?  @db.VarChar(190)
+  parent_name   String?  @db.VarChar(160)
+  parent_phone  String?  @db.VarChar(30)
+  status        String   @default("active") @db.VarChar(40)
+  created_at    DateTime @default(now()) @db.Timestamp(0)
+  updated_at    DateTime @default(now()) @db.Timestamp(0)
+  signup_source String   @default("web") @db.VarChar(40)
+  class_name    String?  @db.VarChar(80)
+  school        String?  @db.VarChar(190)
+  schoolId      String?  @map("school_id") @db.VarChar(64)
+  users         users?   @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "fk_students_user")
+
+  @@index([schoolId], map: "idx_students_school_id")
+  @@index([school_name], map: "idx_students_school_name")
+  @@index([user_id], map: "idx_students_user_id")
+  @@map("students")
+}
+
+model Teacher {
+  id               String    @id @default(cuid()) @db.VarChar(64)
+  schoolId         String    @map("school_id") @db.VarChar(64)
+  school_name      String    @db.VarChar(190)
+  teacher_name     String    @db.VarChar(160)
+  email            String    @unique(map: "email") @db.VarChar(190)
+  password_hash    String    @db.VarChar(255)
+  staff_key_hash   String    @db.VarChar(255)
+  subject          String?   @db.VarChar(120)
+  phone            String?   @db.VarChar(30)
+  assigned_classes Json?
+  status           String    @default("active") @db.VarChar(40)
+  last_login_at    DateTime? @db.DateTime(0)
+  created_at       DateTime  @default(now()) @db.Timestamp(0)
+  updated_at       DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([schoolId], map: "idx_teachers_school_id")
+  @@index([school_name], map: "idx_teachers_school_name")
+  @@map("teachers")
+}
+
+model attendance {
+  id         String    @id @db.VarChar(64)
+  user_id    String    @db.VarChar(64)
+  subject    String    @db.VarChar(100)
+  status     String    @db.VarChar(30)
+  time       String    @db.VarChar(50)
+  source     String    @db.VarChar(50)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([user_id], map: "idx_attendance_user_id")
+}
+
+model certificates {
+  credential_id String    @id @db.VarChar(90)
+  student_name  String    @db.VarChar(160)
+  user_email    String    @db.VarChar(190)
+  course        String    @db.VarChar(190)
+  qr_code       String?   @db.LongText
+  issued_at     DateTime? @db.DateTime(0)
+  status        String    @default("active") @db.VarChar(40)
+  created_at    DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([user_email], map: "idx_certificates_user_email")
+}
+
+model courses {
+  id          String        @id @db.VarChar(64)
+  title       String        @db.VarChar(190)
+  slug        String        @unique(map: "slug") @db.VarChar(190)
+  description String?       @db.Text
+  level       String?       @db.VarChar(80)
+  category    String?       @db.VarChar(120)
+  duration    String?       @db.VarChar(80)
+  price       Decimal       @default(0.00) @db.Decimal(10, 2)
+  currency    String        @default("INR") @db.VarChar(10)
+  status      String        @default("active") @db.VarChar(40)
+  created_at  DateTime      @default(now()) @db.Timestamp(0)
+  updated_at  DateTime      @default(now()) @db.Timestamp(0)
+  enrollments enrollments[]
+}
+
+model dashboard_snapshots {
+  id         String   @id @db.VarChar(64)
+  user_email String   @unique(map: "user_email") @db.VarChar(190)
+  snapshot   Json
+  source     String   @default("seed") @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+  updated_at DateTime @default(now()) @db.Timestamp(0)
+}
+
+model enrollments {
+  id           String    @id @db.VarChar(64)
+  user_email   String    @db.VarChar(190)
+  course_id    String?   @db.VarChar(64)
+  course_title String    @db.VarChar(190)
+  payment_id   String?   @db.VarChar(64)
+  status       String    @default("active") @db.VarChar(40)
+  enrolled_at  DateTime  @default(now()) @db.DateTime(0)
+  completed_at DateTime? @db.DateTime(0)
+  created_at   DateTime  @default(now()) @db.Timestamp(0)
+  updated_at   DateTime  @default(now()) @db.Timestamp(0)
+  courses      courses?  @relation(fields: [course_id], references: [id], onUpdate: NoAction, map: "fk_enrollments_course")
+  payments     payments? @relation(fields: [payment_id], references: [id], onUpdate: NoAction, map: "fk_enrollments_payment")
+
+  @@index([course_id], map: "fk_enrollments_course")
+  @@index([payment_id], map: "fk_enrollments_payment")
+  @@index([user_email], map: "idx_enrollments_user_email")
+}
+
+model leads {
+  id          String   @id @db.VarChar(64)
+  type        String   @db.VarChar(40)
+  name        String?  @db.VarChar(160)
+  email       String   @db.VarChar(190)
+  phone       String?  @db.VarChar(30)
+  school      String?  @db.VarChar(190)
+  city        String?  @db.VarChar(120)
+  message     String?  @db.Text
+  class_level String?  @db.VarChar(80)
+  interest    String?  @db.VarChar(190)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  class_name  String?  @db.VarChar(80)
+
+  @@index([email], map: "idx_leads_email")
+}
+
+model login_events {
+  id         String   @id @db.VarChar(64)
+  user_id    String?  @db.VarChar(64)
+  email      String   @db.VarChar(190)
+  name       String?  @db.VarChar(160)
+  role       String?  @db.VarChar(30)
+  ip_address String?  @db.VarChar(80)
+  user_agent String?  @db.Text
+  status     String   @default("success") @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+  source     String   @default("web") @db.VarChar(40)
+
+  @@index([email], map: "idx_login_events_email")
+}
+
+model notifications {
+  id         String    @id @db.VarChar(64)
+  user_email String?   @db.VarChar(190)
+  title      String    @db.VarChar(190)
+  message    String    @db.Text
+  channel    String    @default("email") @db.VarChar(40)
+  status     String    @default("queued") @db.VarChar(40)
+  read_at    DateTime? @db.DateTime(0)
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([user_email], map: "idx_notifications_user_email")
+}
+
+model otps {
+  id          String    @id @db.VarChar(64)
+  email       String    @db.VarChar(190)
+  code        String    @db.VarChar(20)
+  expires_at  DateTime  @db.DateTime(0)
+  consumed_at DateTime? @db.DateTime(0)
+  created_at  DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([email], map: "idx_otps_email")
+}
+
+model payments {
+  id                  String        @id @db.VarChar(64)
+  user_email          String        @db.VarChar(190)
+  plan                String        @db.VarChar(160)
+  amount              Decimal       @db.Decimal(10, 2)
+  currency            String        @default("INR") @db.VarChar(10)
+  razorpay_order_id   String?       @unique(map: "razorpay_order_id") @db.VarChar(190)
+  razorpay_payment_id String?       @db.VarChar(190)
+  status              String        @default("created") @db.VarChar(40)
+  receipt_url         String?       @db.Text
+  created_at          DateTime      @default(now()) @db.Timestamp(0)
+  updated_at          DateTime      @default(now()) @db.Timestamp(0)
+  enrollments         enrollments[]
+
+  @@index([user_email], map: "idx_payments_user_email")
+}
+
+model principal_login_events {
+  id           String   @id @db.VarChar(64)
+  principal_id String?  @db.VarChar(64)
+  email        String   @db.VarChar(190)
+  school_id    String?  @db.VarChar(64)
+  ip_address   String?  @db.VarChar(80)
+  user_agent   String?  @db.Text
+  status       String   @default("success") @db.VarChar(40)
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([email], map: "idx_principal_login_events_email")
+  @@index([school_id], map: "idx_principal_login_events_school_id")
+}
+
+model principals {
+  id              String    @id @db.VarChar(64)
+  school_id       String    @db.VarChar(64)
+  school_name     String    @db.VarChar(190)
+  principal_name  String    @db.VarChar(160)
+  email           String    @unique(map: "email") @db.VarChar(190)
+  password_hash   String    @db.VarChar(255)
+  access_key_hash String    @db.VarChar(255)
+  phone           String?   @db.VarChar(30)
+  status          String    @default("active") @db.VarChar(40)
+  last_login_at   DateTime? @db.DateTime(0)
+  created_at      DateTime  @default(now()) @db.Timestamp(0)
+  updated_at      DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([school_id], map: "idx_principals_school_id")
+  @@index([school_name], map: "idx_principals_school_name")
+}
+
+model teacher_class_sessions {
+  id          String    @id @db.VarChar(64)
+  teacher_id  String    @db.VarChar(64)
+  title       String    @db.VarChar(190)
+  class_level String    @db.VarChar(80)
+  subject     String?   @db.VarChar(120)
+  start_time  DateTime  @db.DateTime(0)
+  end_time    DateTime? @db.DateTime(0)
+  room        String?   @db.VarChar(80)
+  mode        String    @default("online") @db.VarChar(40)
+  status      String    @default("scheduled") @db.VarChar(40)
+  created_at  DateTime  @default(now()) @db.Timestamp(0)
+  updated_at  DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([class_level], map: "idx_teacher_class_sessions_class_level")
+  @@index([start_time], map: "idx_teacher_class_sessions_start_time")
+  @@index([teacher_id], map: "idx_teacher_class_sessions_teacher_id")
+}
+
+model teacher_login_events {
+  id         String   @id @db.VarChar(64)
+  teacher_id String?  @db.VarChar(64)
+  email      String   @db.VarChar(190)
+  school_id  String?  @db.VarChar(64)
+  ip_address String?  @db.VarChar(80)
+  user_agent String?  @db.Text
+  status     String   @default("success") @db.VarChar(40)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([email], map: "idx_teacher_login_events_email")
+  @@index([school_id], map: "idx_teacher_login_events_school_id")
+}
+
+model users {
+  id               String    @id @db.VarChar(64)
+  name             String    @db.VarChar(160)
+  email            String    @unique(map: "email") @db.VarChar(190)
+  password_hash    String    @db.VarChar(255)
+  phone            String?   @db.VarChar(30)
+  class_level      String?   @db.VarChar(80)
+  school_name      String?   @db.VarChar(190)
+  role             String    @default("student") @db.VarChar(30)
+  otp_verified     Boolean   @default(false)
+  unlocked_courses Json?
+  created_at       DateTime  @default(now()) @db.Timestamp(0)
+  updated_at       DateTime  @default(now()) @db.Timestamp(0)
+  signup_source    String    @default("web") @db.VarChar(40)
+  class_name       String?   @db.VarChar(80)
+  school           String?   @db.VarChar(190)
+  password         String    @db.VarChar(255)
+  teacher_id       String?   @db.VarChar(64)
+  school_id        String?   @db.VarChar(64)
+  students         Student[]
+
+  @@index([school_name], map: "idx_users_school_name")
+}

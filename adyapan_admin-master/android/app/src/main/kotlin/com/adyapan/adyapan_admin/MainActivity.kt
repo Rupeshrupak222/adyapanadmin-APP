@@ -1,0 +1,6 @@
+package com.adyapan.adyapan_admin
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity() {
+}
