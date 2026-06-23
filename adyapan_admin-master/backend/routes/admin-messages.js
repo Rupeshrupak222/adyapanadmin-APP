@@ -1,3 +1,27 @@
+/**
+ * admin-messages.js
+ *
+ * Unified messaging backend — shared by the Flutter admin app AND the
+ * Adyapan website (preschool-wzjj.onrender.com).
+ *
+ * Both projects write to / read from the same `admin_messages` table so
+ * a message sent from the website immediately appears in the Flutter app
+ * and vice versa.
+ *
+ * Table schema (auto-created if absent):
+ *   admin_messages (
+ *     id             VARCHAR(64)   PRIMARY KEY,
+ *     sender_email   VARCHAR(190)  NOT NULL,
+ *     sender_name    VARCHAR(190)  NOT NULL,
+ *     recipient_type ENUM('individual','broadcast') NOT NULL,
+ *     recipient_email VARCHAR(190) NULL,   -- set for individual
+ *     recipient_role  VARCHAR(40)  NULL,   -- set for broadcast
+ *     message        TEXT          NOT NULL,
+ *     is_read        TINYINT(1)    NOT NULL DEFAULT 0,
+ *     created_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP
+ *   )
+ */
+
 const express = require('express');
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
@@ -6,350 +30,345 @@ const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
-// ─── FCM helper ─────────────────────────────────────────────────────────────
-// Lazily initialise firebase-admin only when a valid service-account JSON is
-// provided.  If it is absent the route still works – messages are saved to DB
-// and principals see them on the next 30-second poll; no crash occurs.
-let _fcmApp = null;
+// ─── Ensure admin_messages table exists ──────────────────────────────────────
+// Runs lazily on first request so it works without a manual migration.
+let _tableReady = false;
+async function ensureTable() {
+  if (_tableReady) return;
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS admin_messages (
+      id              VARCHAR(64)   NOT NULL PRIMARY KEY,
+      sender_email    VARCHAR(190)  NOT NULL,
+      sender_name     VARCHAR(190)  NOT NULL DEFAULT '',
+      recipient_type  VARCHAR(20)   NOT NULL DEFAULT 'individual',
+      recipient_email VARCHAR(190)  NULL,
+      recipient_role  VARCHAR(40)   NULL,
+      message         TEXT          NOT NULL,
+      is_read         TINYINT(1)    NOT NULL DEFAULT 0,
+      created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_amsg_recipient_email (recipient_email),
+      KEY idx_amsg_recipient_role  (recipient_role),
+      KEY idx_amsg_created_at      (created_at)
+    )
+  `);
+  _tableReady = true;
+}
 
+// ─── FCM helper ──────────────────────────────────────────────────────────────
+let _fcmApp = null;
 function getFcmApp() {
   if (_fcmApp) return _fcmApp;
-
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!raw) return null;
-
   try {
     const admin = require('firebase-admin');
-    const serviceAccount = typeof raw === 'string' ? JSON.parse(raw) : raw;
-
-    _fcmApp = admin.initializeApp(
-      { credential: admin.credential.cert(serviceAccount) },
-      'adyapan-fcm'          // named app so it doesn't clash with other usages
-    );
+    const sa = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    _fcmApp = admin.initializeApp({ credential: admin.credential.cert(sa) }, 'adyapan-fcm');
     console.log('✅ Firebase Admin initialised for FCM');
     return _fcmApp;
   } catch (err) {
-    console.error('⚠️  Firebase Admin init failed – push notifications disabled:', err.message);
+    console.error('⚠️  Firebase Admin init failed:', err.message);
     return null;
   }
 }
 
-/**
- * Send a single FCM push notification.
- * Silently swallows errors so the main flow is never broken.
- *
- * @param {string} token  - FCM device token
- * @param {string} title  - notification title
- * @param {string} body   - notification body
- */
-async function sendFcmPush(token, title, body) {
+async function sendFcm(token, title, body, data = {}) {
   if (!token) return;
   const app = getFcmApp();
   if (!app) return;
-
   try {
     const admin = require('firebase-admin');
-    const message = {
+    await admin.messaging(app).send({
       notification: { title, body },
-      data: { type: 'admin_message', sentAt: new Date().toISOString() },
+      data: { sentAt: new Date().toISOString(), ...data },
       token,
-      android: {
-        priority: 'high',
-        notification: { channelId: 'admin_messages', sound: 'default' },
-      },
-      apns: {
-        payload: { aps: { sound: 'default', badge: 1 } },
-      },
-    };
-    await admin.messaging(app).send(message);
+      android: { priority: 'high', notification: { channelId: 'admin_messages', sound: 'default' } },
+      apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+    });
   } catch (err) {
-    // Invalid / expired token – clear it from DB to avoid future failures
-    if (
-      err.code === 'messaging/invalid-registration-token' ||
-      err.code === 'messaging/registration-token-not-registered'
-    ) {
-      try {
-        await prisma.principals.updateMany({
-          where: { fcm_token: token },
-          data: { fcm_token: null },
-        });
-      } catch (_) {}
+    // Clear stale tokens
+    if (['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(err.code)) {
+      await prisma.principals.updateMany({ where: { fcm_token: token }, data: { fcm_token: null } }).catch(() => {});
+      await prisma.teacher.updateMany({ where: { fcm_token: token }, data: { fcm_token: null } }).catch(() => {});
+      await prisma.admin_fcm_tokens.deleteMany({ where: { fcm_token: token } }).catch(() => {});
     }
-    console.error('FCM send error:', err.message);
+    console.error('FCM error:', err.message);
   }
 }
 
-// ─── PATCH /api/v1/admin-messages/fcm-token ──────────────────────────────────
-// Called by the Flutter app (Principal) after login to register / refresh the
-// FCM device token so push notifications reach the device.
-router.patch('/fcm-token', authenticate, authorize('principal', 'admin'), async (req, res) => {
+async function notifyAdmins(title, body) {
+  try {
+    const tokens = await prisma.admin_fcm_tokens.findMany();
+    await Promise.allSettled(tokens.map(t => sendFcm(t.fcm_token, title, body, { type: 'reply' })));
+  } catch (err) {
+    console.error('notifyAdmins error:', err.message);
+  }
+}
+
+// ─── PATCH /fcm-token ─────────────────────────────────────────────────────────
+// Register/refresh FCM token for admin, principal, or teacher after login.
+router.patch('/fcm-token', authenticate, authorize('principal', 'teacher', 'admin'), async (req, res) => {
   try {
     const { fcm_token } = req.body;
-    if (!fcm_token) {
-      return sendResponse(res, 400, false, 'fcm_token is required.');
-    }
-
+    if (!fcm_token) return sendResponse(res, 400, false, 'fcm_token is required.');
     const email = req.user?.email?.toLowerCase().trim();
-    if (!email) {
-      return sendResponse(res, 401, false, 'Unauthorised.');
+    if (!email) return sendResponse(res, 401, false, 'Unauthorised.');
+
+    if (req.user.role === 'admin') {
+      await prisma.admin_fcm_tokens.upsert({
+        where: { email },
+        update: { fcm_token: fcm_token.trim(), updated_at: new Date() },
+        create: { id: crypto.randomUUID(), email, fcm_token: fcm_token.trim(), updated_at: new Date() },
+      });
+    } else if (req.user.role === 'teacher') {
+      await prisma.teacher.updateMany({ where: { email }, data: { fcm_token: fcm_token.trim() } });
+    } else {
+      await prisma.principals.updateMany({ where: { email }, data: { fcm_token: fcm_token.trim() } });
     }
-
-    await prisma.principals.updateMany({
-      where: { email },
-      data: { fcm_token: fcm_token.trim() },
-    });
-
     sendResponse(res, 200, true, 'FCM token updated.');
-  } catch (error) {
-    console.error('Failed to update FCM token:', error);
+  } catch (err) {
+    console.error('fcm-token error:', err);
     sendResponse(res, 500, false, 'Failed to update FCM token.');
   }
 });
 
-// ─── GET /api/v1/admin-messages ──────────────────────────────────────────────
-// Principals fetch their inbox; Admins can optionally query by schoolId.
-router.get('/', authenticate, authorize('principal', 'admin'), async (req, res) => {
+// ─── GET / ────────────────────────────────────────────────────────────────────
+// Inbox for principal or teacher — messages addressed to them individually
+// OR broadcast to their role.
+router.get('/', authenticate, authorize('principal', 'teacher', 'admin'), async (req, res) => {
   try {
-    const { schoolId } = req.query;
-    let emails = [];
+    await ensureTable();
+    const email = req.user.email.toLowerCase().trim();
+    const role = req.user.role;
 
-    if (req.user && req.user.email) {
-      emails.push(req.user.email.toLowerCase().trim());
+    let rows;
+    if (role === 'admin') {
+      // Admin sees messages sent TO admin (broadcasts + individual)
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT id, sender_email, sender_name, message, is_read, created_at
+         FROM admin_messages
+         WHERE (recipient_type = 'individual' AND recipient_email = ?)
+            OR (recipient_type = 'broadcast' AND recipient_role = 'admin')
+         ORDER BY created_at DESC LIMIT 100`,
+        email
+      );
+    } else {
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT id, sender_email, sender_name, message, is_read, created_at
+         FROM admin_messages
+         WHERE (recipient_type = 'individual' AND recipient_email = ?)
+            OR (recipient_type = 'broadcast' AND recipient_role = ?)
+         ORDER BY created_at DESC LIMIT 100`,
+        email,
+        role
+      );
     }
 
-    // Also resolve principal emails for the schoolId if provided
-    if (schoolId) {
-      const principals = await prisma.principals.findMany({
-        where: {
-          OR: [
-            { id: schoolId },
-            { school_id: schoolId },
-            { school_name: schoolId },
-          ],
-        },
-      });
-      principals.forEach((p) => {
-        if (p.email) {
-          const email = p.email.toLowerCase().trim();
-          if (!emails.includes(email)) emails.push(email);
-        }
-      });
-    }
-
-    const notices = await prisma.notifications.findMany({
-      where: {
-        OR: [
-          { user_email: { in: emails } },
-          { user_email: null },
-        ],
-      },
-      orderBy: { created_at: 'desc' },
-    });
-
-    // Format to what client expects: id, title, message, sentAt, status
-    const formatted = notices.map((n) => ({
-      id: n.id,
-      title: n.title || '📢 Admin Message',
-      message: n.message,
-      sentAt: n.created_at,
-      status: n.status,
-      read_at: n.read_at,
+    const formatted = (rows ?? []).map(r => ({
+      id: String(r.id),
+      title: `📢 Message from ${r.sender_name || 'Admin'}`,
+      message: String(r.message),
+      sender_name: String(r.sender_name || ''),
+      sentAt: r.created_at,
+      status: r.is_read ? 'read' : 'sent',
+      read_at: r.is_read ? r.created_at : null,
     }));
 
     res.json(formatted);
-  } catch (error) {
-    console.error('Failed to fetch admin messages:', error);
-    sendResponse(res, 500, false, 'Failed to fetch admin messages.');
+  } catch (err) {
+    console.error('GET admin-messages error:', err);
+    sendResponse(res, 500, false, 'Failed to fetch messages.');
   }
 });
 
-// ─── POST /api/v1/admin-messages ─────────────────────────────────────────────
-// Only admins can send messages to principals.
+// ─── POST / ───────────────────────────────────────────────────────────────────
+// Admin sends a message to principals and/or teachers of selected schools.
+// Body: { message, schoolIds[], sendToAll, targetRole: 'all'|'principal'|'teacher' }
 router.post('/', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const { message, schoolIds, sendToAll } = req.body;
+    await ensureTable();
+    const { message, schoolIds, sendToAll, targetRole } = req.body;
+    const role = targetRole || 'all';
 
-    if (!message || !message.trim()) {
-      return sendResponse(res, 400, false, 'message is required.');
-    }
+    if (!message?.trim()) return sendResponse(res, 400, false, 'message is required.');
 
+    const senderEmail = req.user.email.toLowerCase().trim();
+    const senderName = req.user.name || 'Admin';
+    const msgTrimmed = message.trim();
     const FCM_TITLE = '📢 Message from Admin';
 
+    const insertMsg = async (recipientEmail, recipientRole, isBroadcast) => {
+      const id = crypto.randomUUID();
+      if (isBroadcast) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_role, message)
+           VALUES (?, ?, ?, 'broadcast', ?, ?)`,
+          id, senderEmail, senderName, recipientRole, msgTrimmed
+        );
+      } else {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_email, recipient_role, message)
+           VALUES (?, ?, ?, 'individual', ?, ?, ?)`,
+          id, senderEmail, senderName, recipientEmail, recipientRole, msgTrimmed
+        );
+      }
+    };
+
     if (sendToAll) {
-      // ── Broadcast to every principal ──────────────────────────────
-      const notice = await prisma.notifications.create({
-        data: {
-          id: crypto.randomUUID(),
-          title: FCM_TITLE,
-          message: message.trim(),
-          user_email: null,
-          channel: 'app',
-          status: 'sent',
-        },
-      });
+      // Broadcast rows
+      if (role === 'all' || role === 'principal') await insertMsg(null, 'principal', true);
+      if (role === 'all' || role === 'teacher')   await insertMsg(null, 'teacher', true);
 
-      // Push to all principals that have an FCM token
-      const allPrincipals = await prisma.principals.findMany({
-        where: { fcm_token: { not: null }, status: 'active' },
-        select: { fcm_token: true },
-      });
+      // FCM to all with tokens
+      const pushTargets = [];
+      if (role === 'all' || role === 'principal') {
+        const ps = await prisma.principals.findMany({ where: { fcm_token: { not: null }, status: 'active' }, select: { fcm_token: true } });
+        ps.forEach(p => pushTargets.push(p.fcm_token));
+      }
+      if (role === 'all' || role === 'teacher') {
+        const ts = await prisma.teacher.findMany({ where: { fcm_token: { not: null }, status: 'active' }, select: { fcm_token: true } });
+        ts.forEach(t => pushTargets.push(t.fcm_token));
+      }
+      await Promise.allSettled(pushTargets.map(token => sendFcm(token, FCM_TITLE, msgTrimmed, { type: 'admin_message' })));
 
-      await Promise.allSettled(
-        allPrincipals.map((p) => sendFcmPush(p.fcm_token, FCM_TITLE, message.trim()))
-      );
-
-      return sendResponse(res, 201, true, 'Broadcast admin message sent.', notice);
+      return sendResponse(res, 201, true, 'Broadcast message sent.');
     }
 
-    if (!schoolIds || !Array.isArray(schoolIds) || schoolIds.length === 0) {
+    if (!Array.isArray(schoolIds) || schoolIds.length === 0) {
       return sendResponse(res, 400, false, 'No schoolIds provided.');
     }
 
-    // ── Send to specific schools ──────────────────────────────────
-    const principals = await prisma.principals.findMany({
-      where: { school_id: { in: schoolIds } },
-    });
-
-    if (principals.length === 0) {
-      return sendResponse(res, 404, false, 'No principals found for the selected schools.');
+    let principals = [], teachers = [];
+    if (role === 'all' || role === 'principal') {
+      principals = await prisma.principals.findMany({ where: { school_id: { in: schoolIds } } });
+    }
+    if (role === 'all' || role === 'teacher') {
+      teachers = await prisma.teacher.findMany({ where: { schoolId: { in: schoolIds } } });
     }
 
-    // Save a DB notification for each principal
-    const creations = principals.map((principal) =>
-      prisma.notifications.create({
-        data: {
-          id: crypto.randomUUID(),
-          title: FCM_TITLE,
-          message: message.trim(),
-          user_email: principal.email ? principal.email.toLowerCase().trim() : null,
-          channel: 'app',
-          status: 'sent',
-        },
-      })
-    );
-    await Promise.all(creations);
+    if (!principals.length && !teachers.length) {
+      return sendResponse(res, 404, false, 'No recipients found for the selected schools.');
+    }
 
-    // Fire FCM push to each principal that has a token
-    await Promise.allSettled(
-      principals
-        .filter((p) => p.fcm_token)
-        .map((p) => sendFcmPush(p.fcm_token, FCM_TITLE, message.trim()))
-    );
+    await Promise.all([
+      ...principals.map(p => insertMsg(p.email?.toLowerCase().trim(), 'principal', false)),
+      ...teachers.map(t => insertMsg(t.email?.toLowerCase().trim(), 'teacher', false)),
+    ]);
 
-    sendResponse(res, 201, true, 'Admin messages sent successfully.');
-  } catch (error) {
-    console.error('Failed to create admin message:', error);
-    sendResponse(res, 500, false, 'Failed to create admin message.');
+    await Promise.allSettled([
+      ...principals.filter(p => p.fcm_token).map(p => sendFcm(p.fcm_token, FCM_TITLE, msgTrimmed, { type: 'admin_message' })),
+      ...teachers.filter(t => t.fcm_token).map(t => sendFcm(t.fcm_token, FCM_TITLE, msgTrimmed, { type: 'admin_message' })),
+    ]);
+
+    sendResponse(res, 201, true, `Message sent to ${principals.length + teachers.length} recipient(s).`);
+  } catch (err) {
+    console.error('POST admin-messages error:', err);
+    sendResponse(res, 500, false, 'Failed to send message.');
   }
 });
 
-// ─── PUT /api/v1/admin-messages/:id/read ─────────────────────────────────────
-// Mark a notification as read on the server (principal only).
-router.put('/:id/read', authenticate, authorize('principal', 'admin'), async (req, res) => {
+// ─── PUT /:id/read ────────────────────────────────────────────────────────────
+router.put('/:id/read', authenticate, authorize('principal', 'teacher', 'admin'), async (req, res) => {
   try {
-    const notice = await prisma.notifications.findUnique({ where: { id: req.params.id } });
-    if (!notice) return sendResponse(res, 404, false, 'Message not found.');
-
-    await prisma.notifications.update({
-      where: { id: req.params.id },
-      data: { read_at: new Date(), status: 'read' },
-    });
-
+    await ensureTable();
+    await prisma.$executeRawUnsafe(
+      'UPDATE admin_messages SET is_read = 1 WHERE id = ?',
+      req.params.id
+    );
     sendResponse(res, 200, true, 'Message marked as read.');
-  } catch (error) {
-    console.error('Failed to mark message as read:', error);
-    sendResponse(res, 500, false, 'Failed to mark message as read.');
+  } catch (err) {
+    console.error('mark-read error:', err);
+    sendResponse(res, 500, false, 'Failed to mark as read.');
   }
 });
 
-// ─── POST /api/v1/admin-messages/reply ───────────────────────────────────────
-// Principal sends a reply / message back to the admin.
-// Stored as a notification with channel='reply' and user_email = principal's email.
-router.post('/reply', authenticate, authorize('principal'), async (req, res) => {
+// ─── POST /reply ──────────────────────────────────────────────────────────────
+// Principal or Teacher sends a reply to admin.
+// Stored as a broadcast to 'admin' role so ALL admin views pick it up.
+router.post('/reply', authenticate, authorize('principal', 'teacher'), async (req, res) => {
   try {
+    await ensureTable();
     const { message } = req.body;
+    if (!message?.trim()) return sendResponse(res, 400, false, 'message is required.');
 
-    if (!message || !message.trim()) {
-      return sendResponse(res, 400, false, 'message is required.');
+    const email = req.user.email.toLowerCase().trim();
+    const role = req.user.role;
+    let senderLabel = email;
+
+    if (role === 'teacher') {
+      const t = await prisma.teacher.findUnique({ where: { email } });
+      if (t) senderLabel = `${t.teacher_name} – Teacher (${t.school_name})`;
+    } else {
+      const p = await prisma.principals.findUnique({ where: { email } });
+      if (p) senderLabel = `${p.principal_name} – Principal (${p.school_name})`;
     }
 
-    const email = req.user?.email?.toLowerCase().trim();
-    if (!email) return sendResponse(res, 401, false, 'Unauthorised.');
+    const id = crypto.randomUUID();
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_role, message)
+       VALUES (?, ?, ?, 'broadcast', 'admin', ?)`,
+      id, email, senderLabel, message.trim()
+    );
 
-    // Look up principal to get school info
-    const principal = await prisma.principals.findUnique({ where: { email } });
+    // Push notification to all admins
+    notifyAdmins(`📩 Reply from ${senderLabel}`, message.trim());
 
-    const senderLabel = principal
-      ? `${principal.principal_name} (${principal.school_name})`
-      : email;
-
-    const notice = await prisma.notifications.create({
-      data: {
-        id: crypto.randomUUID(),
-        title: `📩 Reply from ${senderLabel}`,
-        message: message.trim(),
-        user_email: email,
-        channel: 'reply',
-        status: 'sent',
-      },
-    });
-
-    sendResponse(res, 201, true, 'Reply sent to admin.', {
-      id: notice.id,
-      title: notice.title,
-      message: notice.message,
-      sentAt: notice.created_at,
-    });
-  } catch (error) {
-    console.error('Failed to send principal reply:', error);
+    sendResponse(res, 201, true, 'Reply sent to admin.', { id, message: message.trim(), sentAt: new Date() });
+  } catch (err) {
+    console.error('reply error:', err);
     sendResponse(res, 500, false, 'Failed to send reply.');
   }
 });
 
-// ─── GET /api/v1/admin-messages/replies ──────────────────────────────────────
-// Admin fetches all replies sent by principals.
+// ─── GET /replies ─────────────────────────────────────────────────────────────
+// Admin fetches all replies (messages addressed to 'admin' from principal/teacher).
 router.get('/replies', authenticate, authorize('admin'), async (req, res) => {
   try {
+    await ensureTable();
     const { schoolId, page = 1, limit = 50 } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const where = { channel: 'reply' };
-
+    let rows;
     if (schoolId) {
-      // Resolve email(s) of principals belonging to that school
-      const principals = await prisma.principals.findMany({
-        where: { school_id: schoolId },
-        select: { email: true },
-      });
-      const emails = principals.map((p) => p.email.toLowerCase().trim());
-      if (emails.length === 0) {
-        return res.json([]);
-      }
-      where.user_email = { in: emails };
+      const principals = await prisma.principals.findMany({ where: { school_id: schoolId }, select: { email: true } });
+      const teachers = await prisma.teacher.findMany({ where: { schoolId }, select: { email: true } });
+      const emails = [
+        ...principals.map(p => p.email.toLowerCase().trim()),
+        ...teachers.map(t => t.email.toLowerCase().trim()),
+      ];
+      if (!emails.length) return res.json([]);
+      const placeholders = emails.map(() => '?').join(',');
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT id, sender_email, sender_name, message, is_read, created_at
+         FROM admin_messages
+         WHERE recipient_type = 'broadcast' AND recipient_role = 'admin'
+           AND sender_email IN (${placeholders})
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        ...emails, parseInt(limit), skip
+      );
+    } else {
+      rows = await prisma.$queryRawUnsafe(
+        `SELECT id, sender_email, sender_name, message, is_read, created_at
+         FROM admin_messages
+         WHERE recipient_type = 'broadcast' AND recipient_role = 'admin'
+         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        parseInt(limit), skip
+      );
     }
 
-    const [replies, total] = await Promise.all([
-      prisma.notifications.findMany({
-        where,
-        skip,
-        take: parseInt(limit),
-        orderBy: { created_at: 'desc' },
-      }),
-      prisma.notifications.count({ where }),
-    ]);
-
-    const formatted = replies.map((r) => ({
-      id: r.id,
-      title: r.title,
-      message: r.message,
-      from_email: r.user_email,
+    const formatted = (rows ?? []).map(r => ({
+      id: String(r.id),
+      title: `📩 Reply from ${r.sender_name || r.sender_email}`,
+      message: String(r.message),
+      from_email: String(r.sender_email),
+      sender_name: String(r.sender_name || ''),
       sentAt: r.created_at,
-      status: r.status,
+      status: r.is_read ? 'read' : 'sent',
     }));
 
     res.json(formatted);
-  } catch (error) {
-    console.error('Failed to fetch replies:', error);
+  } catch (err) {
+    console.error('GET replies error:', err);
     sendResponse(res, 500, false, 'Failed to fetch replies.');
   }
 });

@@ -434,8 +434,8 @@ class ApiService {
 
   // ─── FCM TOKEN ────────────────────────────────────────────────
 
-  /// Register or refresh the FCM device token for the logged-in principal.
-  /// Called after login and on token refresh.
+  /// Register or refresh the FCM device token for any logged-in role
+  /// (principal, teacher, or admin). Called after login and on token refresh.
   Future<void> saveFcmToken(String token) async {
     try {
       await http.patch(
@@ -449,12 +449,13 @@ class ApiService {
   }
 
   // ─── ADMIN MESSAGES ───────────────────────────────────────────
-  /// Send a message from admin to one/multiple/all school principals.
-  /// On success, also stores the notification via /api/v1/admin-messages
+  /// Send a message from admin to one/multiple/all school recipients.
+  /// [targetRole]: 'principal' | 'teacher' | 'all'
   Future<void> sendAdminMessage({
     required String message,
     required List<String> schoolIds,
     required bool sendToAll,
+    String targetRole = 'all',
   }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/admin-messages'),
@@ -463,6 +464,7 @@ class ApiService {
         'message': message,
         'schoolIds': schoolIds,
         'sendToAll': sendToAll,
+        'targetRole': targetRole,
         'sentAt': DateTime.now().toIso8601String(),
       }),
     ).timeout(const Duration(seconds: 15));

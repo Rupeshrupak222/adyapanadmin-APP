@@ -3,11 +3,12 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
 
-/// Handles FCM push notification registration and display for Principals.
+/// Handles FCM push notification registration and display.
+///
+/// Works for ALL roles: Admin, Principal, Teacher.
 ///
 /// Call [NotificationService.instance.init()] once in main.dart (after
-/// Firebase.initializeApp), then call [registerTokenForPrincipal] after a
-/// successful Principal login.
+/// Firebase.initializeApp), then call [registerToken] after a successful login.
 class NotificationService {
   NotificationService._internal();
   static final NotificationService instance = NotificationService._internal();
@@ -16,7 +17,7 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
 
   /// Callback invoked when a notification is tapped (foreground or background).
-  /// The host widget (e.g. MainLayout) can set this to open the inbox.
+  /// The host widget (e.g. MainLayout) sets this to open the inbox.
   void Function()? onNotificationTap;
 
   // Android notification channel for admin messages
@@ -24,6 +25,15 @@ class NotificationService {
     'admin_messages',
     'Admin Messages',
     description: 'Push notifications from the Adyapan admin panel',
+    importance: Importance.high,
+    playSound: true,
+  );
+
+  // Secondary channel for admin: incoming replies from principals/teachers
+  static const AndroidNotificationChannel _replyChannel = AndroidNotificationChannel(
+    'admin_replies',
+    'Principal & Teacher Replies',
+    description: 'Replies received from principals and teachers',
     importance: Importance.high,
     playSound: true,
   );
@@ -37,11 +47,12 @@ class NotificationService {
     );
     debugPrint('FCM permission: ${settings.authorizationStatus}');
 
-    // Create Android high-priority channel
-    await _local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    final androidPlugin = _local
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+
+    // Create Android notification channels
+    await androidPlugin?.createNotificationChannel(_channel);
+    await androidPlugin?.createNotificationChannel(_replyChannel);
 
     // Initialise local notifications plugin
     const androidInit = AndroidInitializationSettings('@mipmap/launcher_icon');
@@ -57,13 +68,13 @@ class NotificationService {
     // Show notification when app is in foreground
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
-    // Tapped from background (app was in background but not terminated)
+    // Tapped from background (app was open but not in foreground)
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       debugPrint('Notification tapped (background): ${message.messageId}');
       onNotificationTap?.call();
     });
 
-    // Check if app was launched from a terminated state by tapping a notification
+    // App launched from terminated state by tapping a notification
     final initialMessage = await _fcm.getInitialMessage();
     if (initialMessage != null) {
       debugPrint('App launched from notification: ${initialMessage.messageId}');
@@ -74,18 +85,19 @@ class NotificationService {
     }
   }
 
-  /// Register or refresh the FCM token on the backend for the logged-in principal.
-  Future<void> registerTokenForPrincipal() async {
+  /// Register or refresh the FCM token on the backend for any logged-in role.
+  /// Call this after login for Admin, Principal, and Teacher.
+  Future<void> registerToken() async {
     try {
       final token = await _fcm.getToken();
       if (token == null) return;
-      debugPrint('FCM token: $token');
+      debugPrint('FCM token obtained: ${token.substring(0, 20)}...');
       await ApiService.instance.saveFcmToken(token);
     } catch (e) {
-      debugPrint('NotificationService.registerTokenForPrincipal error: $e');
+      debugPrint('NotificationService.registerToken error: $e');
     }
 
-    // Listen for token refresh and re-register
+    // Re-register on token refresh
     _fcm.onTokenRefresh.listen((newToken) async {
       try {
         await ApiService.instance.saveFcmToken(newToken);
@@ -93,19 +105,26 @@ class NotificationService {
     });
   }
 
+  /// Legacy alias — kept so existing call sites still compile.
+  Future<void> registerTokenForPrincipal() => registerToken();
+
   void _handleForegroundMessage(RemoteMessage message) {
     final notification = message.notification;
     if (notification == null) return;
 
+    // Choose channel based on notification type (reply vs admin message)
+    final type = message.data['type'] ?? '';
+    final channelId = type == 'reply' ? _replyChannel.id : _channel.id;
+    final channelName = type == 'reply' ? _replyChannel.name : _channel.name;
+
     _local.show(
       notification.hashCode,
-      notification.title ?? '📢 Admin Message',
+      notification.title ?? (type == 'reply' ? '📩 New Reply' : '📢 Admin Message'),
       notification.body ?? '',
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
+          channelId,
+          channelName,
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/launcher_icon',
@@ -125,6 +144,5 @@ class NotificationService {
 ///   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Firebase is already initialised by the Flutter engine in background isolate.
   debugPrint('Background FCM message: ${message.messageId}');
 }

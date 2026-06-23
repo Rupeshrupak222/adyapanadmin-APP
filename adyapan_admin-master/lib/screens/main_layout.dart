@@ -56,7 +56,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   }
 
   Future<void> _fetchMessages() async {
-    if (widget.role != 'Principal') return;
+    if (widget.role != 'Principal' && widget.role != 'Teacher') return;
     final schoolId = widget.schoolData?['id']?.toString();
     if (schoolId == null) return;
     try {
@@ -153,8 +153,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                         ),
                         Row(
                           children: [
-                            // Reply button for principals
-                            if (widget.role == 'Principal')
+                            // Reply button for principals and teachers
+                            if (widget.role == 'Principal' || widget.role == 'Teacher')
                               TextButton.icon(
                                 icon: const Icon(Icons.reply_rounded, size: 16, color: Color(0xFF4F46E5)),
                                 label: const Text(
@@ -368,7 +368,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('Reply to Admin', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
-                              Text('Your message will be sent to the Adyapan Admin', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                              Text(
+                                widget.role == 'Teacher'
+                                    ? 'Your message will be sent to the Adyapan Admin'
+                                    : 'Your message will be sent to the Adyapan Admin',
+                                style: TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
                             ],
                           ),
                         ),
@@ -523,7 +528,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     }
 
     _loadReadMessageIds();
-    if (widget.role == 'Principal') {
+    if (widget.role == 'Principal' || widget.role == 'Teacher') {
       _fetchMessages();
       _messageTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchMessages());
       // Wire up notification tap → open inbox automatically
@@ -534,9 +539,21 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           });
         }
       };
+      // Register FCM for principal and teacher
+      NotificationService.instance.registerToken();
     } else if (widget.role == 'Admin') {
       _fetchReplies();
-      _messageTimer = Timer.periodic(const Duration(seconds: 60), (_) => _fetchReplies());
+      _messageTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchReplies());
+      // Wire up notification tap for admin → open replies inbox
+      NotificationService.instance.onNotificationTap = () {
+        if (mounted) {
+          _fetchReplies().then((_) {
+            if (mounted) _showAdminRepliesInbox(context);
+          });
+        }
+      };
+      // Register FCM for admin so they get push on replies
+      NotificationService.instance.registerToken();
     }
   }
 
@@ -544,7 +561,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   void dispose() {
     _messageTimer?.cancel();
     // Clear notification tap callback to avoid calling into a disposed widget
-    if (widget.role == 'Principal') {
+    if (widget.role == 'Principal' || widget.role == 'Teacher' || widget.role == 'Admin') {
       NotificationService.instance.onNotificationTap = null;
     }
     WidgetsBinding.instance.removeObserver(this);
@@ -706,9 +723,35 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
-                                        child: Text(
-                                          titleText,
-                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: Color(0xFF0F172A)),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              titleText,
+                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: Color(0xFF0F172A)),
+                                            ),
+                                            // Role badge derived from title
+                                            if (titleText.toLowerCase().contains('teacher'))
+                                              Container(
+                                                margin: const EdgeInsets.only(top: 3),
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF8B5CF6).withOpacity(0.12),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: const Text('Teacher', style: TextStyle(fontSize: 10, color: Color(0xFF7C3AED), fontWeight: FontWeight.w700)),
+                                              )
+                                            else
+                                              Container(
+                                                margin: const EdgeInsets.only(top: 3),
+                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF3B82F6).withOpacity(0.12),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                ),
+                                                child: const Text('Principal', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.w700)),
+                                              ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -750,6 +793,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     bool sendToAll = false;
     bool isSending = false;
     bool isLoadingSchools = true;
+    String targetRole = 'all'; // 'all' | 'principal' | 'teacher'
 
     showDialog(
       context: context,
@@ -831,6 +875,62 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // ── Recipient Type Selector ──
+                          const Text(
+                            'Send To',
+                            style: TextStyle(color: Color(0xFF0F172A), fontSize: 13, fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.all(4),
+                            child: Row(
+                              children: [
+                                for (final opt in [
+                                  {'value': 'all', 'label': 'Both', 'icon': Icons.people_rounded},
+                                  {'value': 'principal', 'label': 'Principals', 'icon': Icons.person_rounded},
+                                  {'value': 'teacher', 'label': 'Teachers', 'icon': Icons.co_present_rounded},
+                                ]) ...[
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () => setDialogState(() => targetRole = opt['value'] as String),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 180),
+                                        padding: const EdgeInsets.symmetric(vertical: 9),
+                                        decoration: BoxDecoration(
+                                          color: targetRole == opt['value'] ? const Color(0xFF4F46E5) : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(opt['icon'] as IconData,
+                                              size: 14,
+                                              color: targetRole == opt['value'] ? Colors.white : const Color(0xFF64748B),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              opt['label'] as String,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                                color: targetRole == opt['value'] ? Colors.white : const Color(0xFF64748B),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
                           // ── Send to All toggle ──
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1139,6 +1239,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                     message: msg,
                                     schoolIds: targets,
                                     sendToAll: sendToAll,
+                                    targetRole: targetRole,
                                   );
                                   if (context.mounted) Navigator.of(ctx).pop();
                                   if (context.mounted) {
@@ -1181,7 +1282,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                   const Icon(Icons.send_rounded, size: 18),
                                   const SizedBox(width: 8),
                                   Text(
-                                    sendToAll ? 'Send to All Schools' : (selectedSchoolIds.isEmpty ? 'Send Message' : 'Send to ${selectedSchoolIds.length} School${selectedSchoolIds.length > 1 ? 's' : ''}'),
+                                    sendToAll
+                                        ? 'Send to All ${targetRole == 'all' ? 'Recipients' : targetRole == 'principal' ? 'Principals' : 'Teachers'}'
+                                        : (selectedSchoolIds.isEmpty
+                                            ? 'Send Message'
+                                            : 'Send to ${selectedSchoolIds.length} School${selectedSchoolIds.length > 1 ? 's' : ''}'),
                                     style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                                   ),
                                 ],
@@ -1972,7 +2077,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             children: [
               // Notification Icon
               () {
-                final hasUnread = widget.role == 'Principal'
+                final hasUnread = widget.role == 'Principal' || widget.role == 'Teacher'
                     ? _adminMessages.any((m) => !_readMessageIds.contains(m['id']?.toString() ?? ''))
                     : widget.role == 'Admin'
                         ? _principalReplies.any((r) => r['status']?.toString() != 'read')
@@ -1998,7 +2103,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                     ],
                   ),
                   onPressed: () {
-                    if (widget.role == 'Principal') {
+                    if (widget.role == 'Principal' || widget.role == 'Teacher') {
                       _showNotificationInbox(context);
                     } else if (widget.role == 'Admin') {
                       _showAdminRepliesInbox(context);
