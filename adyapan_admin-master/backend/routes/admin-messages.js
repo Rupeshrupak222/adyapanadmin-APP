@@ -428,37 +428,10 @@ router.get('/replies', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
-// ─── DELETE /clear ────────────────────────────────────────────────────────────
-// Truncates / deletes all messages and replies from the database.
-router.delete('/clear', authenticate, authorize('admin', 'principal', 'teacher'), async (req, res) => {
-  try {
-    await ensureTable();
-    await prisma.$executeRawUnsafe('DELETE FROM admin_messages');
-    sendResponse(res, 200, true, 'All messages cleared.');
-  } catch (err) {
-    console.error('DELETE clear error:', err);
-    sendResponse(res, 500, false, 'Failed to clear messages.');
-  }
-});
-
-// ─── DELETE /:id ─────────────────────────────────────────────────────────────
-// Delete a single message by ID (admin only).
-router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    await ensureTable();
-    await prisma.$executeRawUnsafe(
-      'DELETE FROM admin_messages WHERE id = ?',
-      req.params.id
-    );
-    sendResponse(res, 200, true, 'Message deleted.');
-  } catch (err) {
-    console.error('delete message error:', err);
-    sendResponse(res, 500, false, 'Failed to delete message.');
-  }
-});
 
 // ─── DELETE /clear-replies ────────────────────────────────────────────────────
 // Delete ALL reply messages sent to admin (admin only).
+// MUST be defined before DELETE /:id so Express doesn't treat 'clear-replies' as an id.
 router.delete('/clear-replies', authenticate, authorize('admin'), async (req, res) => {
   try {
     await ensureTable();
@@ -469,6 +442,23 @@ router.delete('/clear-replies', authenticate, authorize('admin'), async (req, re
   } catch (err) {
     console.error('clear-replies error:', err);
     sendResponse(res, 500, false, 'Failed to clear replies.');
+  }
+});
+
+// ─── DELETE /:id ─────────────────────────────────────────────────────────────
+// Delete a single message by ID (admin only). Keep this LAST among DELETE routes.
+router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    await ensureTable();
+    const { id } = req.params;
+    await prisma.$executeRawUnsafe(
+      'DELETE FROM admin_messages WHERE id = ?',
+      id
+    );
+    sendResponse(res, 200, true, 'Message deleted.');
+  } catch (err) {
+    console.error('delete message error:', err);
+    sendResponse(res, 500, false, 'Failed to delete message.');
   }
 });
 
