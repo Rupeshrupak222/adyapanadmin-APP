@@ -1002,9 +1002,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                     Row(
                                       children: [
                                         if (fromEmail.isNotEmpty)
-                                          Text(
-                                            fromEmail,
-                                            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w500),
+                                          Flexible(
+                                            child: Text(
+                                              fromEmail,
+                                              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w500),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
                                           ),
                                         const Spacer(),
                                         if (schoolName.isNotEmpty) ...[
@@ -1060,6 +1063,92 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                       ],
                                     ),
                                   ],
+                                  // ── Delete button ──────────────────────────
+                                  const SizedBox(height: 10),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        final replyId = reply['id']?.toString() ?? '';
+                                        if (replyId.isEmpty) return;
+                                        // Confirm before deleting
+                                        final confirmed = await showDialog<bool>(
+                                          context: context,
+                                          builder: (ctx) => AlertDialog(
+                                            backgroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                            title: const Row(
+                                              children: [
+                                                Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                                                SizedBox(width: 8),
+                                                Text('Delete Message', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                                              ],
+                                            ),
+                                            content: const Text(
+                                              'Delete this reply? It will be permanently removed from the database.',
+                                              style: TextStyle(fontSize: 13, color: Color(0xFF475569)),
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.of(ctx).pop(false),
+                                                child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+                                              ),
+                                              ElevatedButton(
+                                                onPressed: () => Navigator.of(ctx).pop(true),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.redAccent,
+                                                  foregroundColor: Colors.white,
+                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                                  elevation: 0,
+                                                ),
+                                                child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w800)),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirmed == true && context.mounted) {
+                                          try {
+                                            await ApiService.instance.deleteAdminReply(replyId);
+                                            setModalState(() {
+                                              _principalReplies.removeWhere((r) => r['id']?.toString() == replyId);
+                                            });
+                                            setState(() {
+                                              _principalReplies.removeWhere((r) => r['id']?.toString() == replyId);
+                                            });
+                                          } catch (e) {
+                                            if (context.mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Delete failed: $e'),
+                                                  backgroundColor: Colors.redAccent,
+                                                  behavior: SnackBarBehavior.floating,
+                                                ),
+                                              );
+                                            }
+                                          }
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.redAccent.withOpacity(0.08),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.redAccent.withOpacity(0.25)),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.delete_outline_rounded, size: 14, color: Colors.redAccent),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'Delete',
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.redAccent),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             );

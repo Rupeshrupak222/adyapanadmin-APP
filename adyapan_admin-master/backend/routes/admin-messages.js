@@ -441,4 +441,35 @@ router.delete('/clear', authenticate, authorize('admin', 'principal', 'teacher')
   }
 });
 
+// ─── DELETE /:id ─────────────────────────────────────────────────────────────
+// Delete a single message by ID (admin only).
+router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    await ensureTable();
+    await prisma.$executeRawUnsafe(
+      'DELETE FROM admin_messages WHERE id = ?',
+      req.params.id
+    );
+    sendResponse(res, 200, true, 'Message deleted.');
+  } catch (err) {
+    console.error('delete message error:', err);
+    sendResponse(res, 500, false, 'Failed to delete message.');
+  }
+});
+
+// ─── DELETE /clear-replies ────────────────────────────────────────────────────
+// Delete ALL reply messages sent to admin (admin only).
+router.delete('/clear-replies', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    await ensureTable();
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM admin_messages WHERE recipient_type = 'broadcast' AND recipient_role = 'admin'`
+    );
+    sendResponse(res, 200, true, 'All replies cleared.');
+  } catch (err) {
+    console.error('clear-replies error:', err);
+    sendResponse(res, 500, false, 'Failed to clear replies.');
+  }
+});
+
 module.exports = router;

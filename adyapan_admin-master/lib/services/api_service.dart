@@ -574,10 +574,27 @@ class ApiService {
     return [];
   }
 
-  /// Delete all messages and replies from the database.
+  /// Delete a single reply message by ID (admin only).
+  Future<void> deleteAdminReply(String id) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/admin-messages/$id'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      String errMsg = 'Failed to delete message';
+      try {
+        final data = json.decode(response.body);
+        errMsg = data['message'] ?? data['error'] ?? errMsg;
+      } catch (_) {}
+      throw Exception('$errMsg (Status ${response.statusCode})');
+    }
+  }
+
+  /// Delete all reply messages from the database (admin only).
   Future<void> clearAllMessages() async {
     final response = await http.delete(
-      Uri.parse('$baseUrl/messages/clear'),
+      Uri.parse('$baseUrl/admin-messages/clear-replies'),
       headers: _headers,
     ).timeout(const Duration(seconds: 15));
 
