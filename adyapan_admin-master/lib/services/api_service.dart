@@ -439,7 +439,7 @@ class ApiService {
   Future<void> saveFcmToken(String token) async {
     try {
       await http.patch(
-        Uri.parse('$baseUrl/admin-messages/fcm-token'),
+        Uri.parse('$baseUrl/messages/fcm-token'),
         headers: _headers,
         body: json.encode({'fcm_token': token}),
       ).timeout(const Duration(seconds: 10));
@@ -457,15 +457,22 @@ class ApiService {
     required bool sendToAll,
     String targetRole = 'all',
   }) async {
+    // Map targetRole to our backend's recipient format
+    String recipient;
+    if (targetRole == 'principal' || targetRole == 'principals') {
+      recipient = 'all-principals';
+    } else if (targetRole == 'teacher' || targetRole == 'teachers') {
+      recipient = 'all-teachers';
+    } else {
+      recipient = 'all'; // both
+    }
+
     final response = await http.post(
-      Uri.parse('$baseUrl/admin-messages'),
+      Uri.parse('$baseUrl/messages'),
       headers: _headers,
       body: json.encode({
+        'recipient': recipient,
         'message': message,
-        'schoolIds': schoolIds,
-        'sendToAll': sendToAll,
-        'targetRole': targetRole,
-        'sentAt': DateTime.now().toIso8601String(),
       }),
     ).timeout(const Duration(seconds: 15));
 
@@ -479,17 +486,19 @@ class ApiService {
     }
   }
 
-  /// Fetch admin messages for a given schoolId (principal notifications).
+  /// Fetch admin messages for the logged-in user.
   Future<List<Map<String, dynamic>>> fetchAdminMessages({String? schoolId}) async {
     try {
-      final queryParam = schoolId != null ? '?schoolId=$schoolId' : '';
       final response = await http.get(
-        Uri.parse('$baseUrl/admin-messages$queryParam'),
+        Uri.parse('$baseUrl/messages'),
         headers: _headers,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        if (data is Map && data['data'] != null) {
+          return List<Map<String, dynamic>>.from(data['data']['messages'] ?? []);
+        }
         if (data is List) {
           return List<Map<String, dynamic>>.from(data);
         }
@@ -504,7 +513,7 @@ class ApiService {
   Future<void> markAdminMessageRead(String id) async {
     try {
       await http.put(
-        Uri.parse('$baseUrl/admin-messages/$id/read'),
+        Uri.parse('$baseUrl/messages/$id/read'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10));
     } catch (e) {
@@ -515,9 +524,12 @@ class ApiService {
   /// Principal sends a reply / message back to the admin.
   Future<Map<String, dynamic>> sendPrincipalReply(String message) async {
     final response = await http.post(
-      Uri.parse('$baseUrl/admin-messages/reply'),
+      Uri.parse('$baseUrl/messages'),
       headers: _headers,
-      body: json.encode({'message': message}),
+      body: json.encode({
+        'recipient': 'all-admins',
+        'message': message,
+      }),
     ).timeout(const Duration(seconds: 15));
 
     if (response.statusCode == 201 || response.statusCode == 200) {
@@ -538,7 +550,7 @@ class ApiService {
     try {
       final queryParam = schoolId != null ? '?schoolId=$schoolId' : '';
       final response = await http.get(
-        Uri.parse('$baseUrl/admin-messages/replies$queryParam'),
+        Uri.parse('$baseUrl/messages$queryParam'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10));
 
