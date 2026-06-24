@@ -115,6 +115,8 @@ class _OverviewTabState extends State<OverviewTab> {
             onPressed: () {
               final text = controller.text.trim();
               if (text.isNotEmpty) {
+                // Persist to backend
+                _dataService.createEvent('System Announcement', text);
                 setState(() {
                   _mockService.systemEvents.insert(0, {
                     'title': 'System Announcement',

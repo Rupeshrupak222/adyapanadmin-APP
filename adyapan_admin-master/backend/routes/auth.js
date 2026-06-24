@@ -6,7 +6,7 @@ const { hashPassword, verifyPassword, needsRehash, generateAccessKey, hashAccess
 const { sendResponse } = require('../utils/response');
 const { validateBody, validateEmail, validatePassword } = require('../middleware/validate');
 const { recordFailedAttempt, clearFailedAttempts } = require('../utils/progressive-delay');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { isLocked, recordFailure, clearFailures } = require('../utils/account-lockout');
 const { blacklistToken, isBlacklisted, revokeAllUserTokens } = require('../utils/token-blacklist');
 const { logLoginSuccess, logLoginFailed, logAccountLocked, logPasswordChanged, logSuspiciousActivity } = require('../utils/security-logger');

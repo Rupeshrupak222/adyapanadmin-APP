@@ -27,8 +27,6 @@ services:
       - key: JWT_REFRESH_EXPIRES_IN
         value: "30d"
       - key: CORS_ORIGINS
-        sync: false
+        value: "https://preschool-wzjj.onrender.com"
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "4000"

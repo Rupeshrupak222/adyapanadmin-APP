@@ -46,11 +46,24 @@ async function ensureTable() {
       message         TEXT          NOT NULL,
       is_read         TINYINT(1)    NOT NULL DEFAULT 0,
       created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      parent_message_id VARCHAR(64) NULL,
+      parent_message_text TEXT NULL,
       KEY idx_amsg_recipient_email (recipient_email),
       KEY idx_amsg_recipient_role  (recipient_role),
       KEY idx_amsg_created_at      (created_at)
     )
   `);
+  // Dynamically add columns in case the table already existed
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE admin_messages ADD COLUMN parent_message_id VARCHAR(64) NULL
+    `);
+  } catch (_) {}
+  try {
+    await prisma.$executeRawUnsafe(`
+      ALTER TABLE admin_messages ADD COLUMN parent_message_text TEXT NULL
+    `);
+  } catch (_) {}
   _tableReady = true;
 }
 
@@ -145,7 +158,7 @@ router.get('/', authenticate, authorize('principal', 'teacher', 'admin'), async 
     if (role === 'admin') {
       // Admin sees messages sent TO admin (broadcasts + individual)
       rows = await prisma.$queryRawUnsafe(
-        `SELECT id, sender_email, sender_name, message, is_read, created_at
+        `SELECT id, sender_email, sender_name, recipient_type, recipient_role, message, is_read, created_at, parent_message_id, parent_message_text
          FROM admin_messages
          WHERE (recipient_type = 'individual' AND recipient_email = ?)
             OR (recipient_type = 'broadcast' AND recipient_role = 'admin')
@@ -154,7 +167,7 @@ router.get('/', authenticate, authorize('principal', 'teacher', 'admin'), async 
       );
     } else {
       rows = await prisma.$queryRawUnsafe(
-        `SELECT id, sender_email, sender_name, message, is_read, created_at
+        `SELECT id, sender_email, sender_name, recipient_type, recipient_role, message, is_read, created_at, parent_message_id, parent_message_text
          FROM admin_messages
          WHERE (recipient_type = 'individual' AND recipient_email = ?)
             OR (recipient_type = 'broadcast' AND recipient_role = ?)
@@ -166,12 +179,17 @@ router.get('/', authenticate, authorize('principal', 'teacher', 'admin'), async 
 
     const formatted = (rows ?? []).map(r => ({
       id: String(r.id),
-      title: `📢 Message from ${r.sender_name || 'Admin'}`,
+      title: r.recipient_role === 'admin'
+        ? `📩 Reply from ${r.sender_name || r.sender_email}`
+        : `📢 Message from ${r.sender_name || 'Admin'}`,
       message: String(r.message),
       sender_name: String(r.sender_name || ''),
+      from_email: String(r.sender_email),
       sentAt: r.created_at,
       status: r.is_read ? 'read' : 'sent',
       read_at: r.is_read ? r.created_at : null,
+      parent_message_id: r.parent_message_id ? String(r.parent_message_id) : null,
+      parent_message_text: r.parent_message_text ? String(r.parent_message_text) : null,
     }));
 
     res.json(formatted);
@@ -184,10 +202,45 @@ router.get('/', authenticate, authorize('principal', 'teacher', 'admin'), async 
 // ─── POST / ───────────────────────────────────────────────────────────────────
 // Admin sends a message to principals and/or teachers of selected schools.
 // Body: { message, schoolIds[], sendToAll, targetRole: 'all'|'principal'|'teacher' }
-router.post('/', authenticate, authorize('admin'), async (req, res) => {
+router.post('/', authenticate, authorize('admin', 'principal', 'teacher'), async (req, res) => {
   try {
     await ensureTable();
-    const { message, schoolIds, sendToAll, targetRole } = req.body;
+    const { message, schoolIds, sendToAll, targetRole, recipient } = req.body;
+
+    // Handle principal or teacher reply sent via the POST / endpoint
+    if (req.user.role === 'principal' || req.user.role === 'teacher') {
+      if (recipient !== 'all-admins') {
+        return sendResponse(res, 403, false, 'Unauthorized to send to this recipient.');
+      }
+      
+      const { parent_message_id, parent_message_text } = req.body;
+      if (!message?.trim()) return sendResponse(res, 400, false, 'message is required.');
+
+      const email = req.user.email.toLowerCase().trim();
+      const role = req.user.role;
+      let senderLabel = email;
+
+      if (role === 'teacher') {
+        const t = await prisma.teacher.findUnique({ where: { email } });
+        if (t) senderLabel = `${t.teacher_name} – Teacher (${t.school_name})`;
+      } else {
+        const p = await prisma.principals.findUnique({ where: { email } });
+        if (p) senderLabel = `${p.principal_name} – Principal (${p.school_name})`;
+      }
+
+      const id = crypto.randomUUID();
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_role, message, parent_message_id, parent_message_text)
+         VALUES (?, ?, ?, 'broadcast', 'admin', ?, ?, ?)`,
+        id, email, senderLabel, message.trim(), parent_message_id || null, parent_message_text || null
+      );
+
+      // Push notification to all admins
+      notifyAdmins(`📩 Reply from ${senderLabel}`, message.trim());
+
+      return sendResponse(res, 201, true, 'Reply sent to admin.', { id, message: message.trim(), sentAt: new Date() });
+    }
+
     const role = targetRole || 'all';
 
     if (!message?.trim()) return sendResponse(res, 400, false, 'message is required.');
@@ -288,7 +341,7 @@ router.put('/:id/read', authenticate, authorize('principal', 'teacher', 'admin')
 router.post('/reply', authenticate, authorize('principal', 'teacher'), async (req, res) => {
   try {
     await ensureTable();
-    const { message } = req.body;
+    const { message, parent_message_id, parent_message_text } = req.body;
     if (!message?.trim()) return sendResponse(res, 400, false, 'message is required.');
 
     const email = req.user.email.toLowerCase().trim();
@@ -305,9 +358,9 @@ router.post('/reply', authenticate, authorize('principal', 'teacher'), async (re
 
     const id = crypto.randomUUID();
     await prisma.$executeRawUnsafe(
-      `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_role, message)
-       VALUES (?, ?, ?, 'broadcast', 'admin', ?)`,
-      id, email, senderLabel, message.trim()
+      `INSERT INTO admin_messages (id, sender_email, sender_name, recipient_type, recipient_role, message, parent_message_id, parent_message_text)
+       VALUES (?, ?, ?, 'broadcast', 'admin', ?, ?, ?)`,
+      id, email, senderLabel, message.trim(), parent_message_id || null, parent_message_text || null
     );
 
     // Push notification to all admins
@@ -339,7 +392,7 @@ router.get('/replies', authenticate, authorize('admin'), async (req, res) => {
       if (!emails.length) return res.json([]);
       const placeholders = emails.map(() => '?').join(',');
       rows = await prisma.$queryRawUnsafe(
-        `SELECT id, sender_email, sender_name, message, is_read, created_at
+        `SELECT id, sender_email, sender_name, message, is_read, created_at, parent_message_id, parent_message_text
          FROM admin_messages
          WHERE recipient_type = 'broadcast' AND recipient_role = 'admin'
            AND sender_email IN (${placeholders})
@@ -348,7 +401,7 @@ router.get('/replies', authenticate, authorize('admin'), async (req, res) => {
       );
     } else {
       rows = await prisma.$queryRawUnsafe(
-        `SELECT id, sender_email, sender_name, message, is_read, created_at
+        `SELECT id, sender_email, sender_name, message, is_read, created_at, parent_message_id, parent_message_text
          FROM admin_messages
          WHERE recipient_type = 'broadcast' AND recipient_role = 'admin'
          ORDER BY created_at DESC LIMIT ? OFFSET ?`,
@@ -364,12 +417,27 @@ router.get('/replies', authenticate, authorize('admin'), async (req, res) => {
       sender_name: String(r.sender_name || ''),
       sentAt: r.created_at,
       status: r.is_read ? 'read' : 'sent',
+      parent_message_id: r.parent_message_id ? String(r.parent_message_id) : null,
+      parent_message_text: r.parent_message_text ? String(r.parent_message_text) : null,
     }));
 
     res.json(formatted);
   } catch (err) {
     console.error('GET replies error:', err);
     sendResponse(res, 500, false, 'Failed to fetch replies.');
+  }
+});
+
+// ─── DELETE /clear ────────────────────────────────────────────────────────────
+// Truncates / deletes all messages and replies from the database.
+router.delete('/clear', authenticate, authorize('admin', 'principal', 'teacher'), async (req, res) => {
+  try {
+    await ensureTable();
+    await prisma.$executeRawUnsafe('DELETE FROM admin_messages');
+    sendResponse(res, 200, true, 'All messages cleared.');
+  } catch (err) {
+    console.error('DELETE clear error:', err);
+    sendResponse(res, 500, false, 'Failed to clear messages.');
   }
 });
 

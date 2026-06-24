@@ -1,4 +1,4 @@
-require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 
 // ─── Validate required env vars ─────────────────────────────────────
 const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET'];
@@ -164,6 +164,7 @@ app.use('/api/v1/notices', noticeRoutes);
 app.use('/api/v1/dashboard', dashboardRoutes);
 app.use('/api/v1/bulk-import', bulkImportRoutes);
 app.use('/api/v1/admin-messages', adminMessageRoutes);
+app.use('/api/v1/messages', adminMessageRoutes);
 
 // ─── 404 Handler ────────────────────────────────────────────────────
 app.use((req, res) => {

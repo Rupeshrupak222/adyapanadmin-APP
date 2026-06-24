@@ -117,16 +117,17 @@ async function getPrincipalDashboard(userId) {
 }
 
 async function getAdminDashboard() {
-  const [totalUsers, totalStudents, totalTeachers, totalSchools, totalPayments, recentLogins] = await Promise.all([
+  const [totalUsers, totalStudents, totalTeachers, totalSchools, totalPayments, totalPrincipals, recentLogins] = await Promise.all([
     prisma.users.count(),
     prisma.student.count(),
     prisma.teacher.count(),
     prisma.school.count(),
     prisma.payments.count(),
+    prisma.principals.count(),
     prisma.login_events.findMany({ orderBy: { created_at: 'desc' }, take: 10 }),
   ]);
   const paidPayments = await prisma.payments.count({ where: { status: 'paid' } });
-  return { totalUsers, totalStudents, totalTeachers, totalSchools, totalPayments, paidPayments, recentLogins };
+  return { totalUsers, totalStudents, totalTeachers, totalSchools, totalPrincipals, totalPayments, paidPayments, recentLogins };
 }
 
 module.exports = router;

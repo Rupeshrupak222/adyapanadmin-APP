@@ -522,13 +522,19 @@ class ApiService {
   }
 
   /// Principal sends a reply / message back to the admin.
-  Future<Map<String, dynamic>> sendPrincipalReply(String message) async {
+  Future<Map<String, dynamic>> sendPrincipalReply(
+    String message, {
+    String? parentMessageId,
+    String? parentMessageText,
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/messages'),
       headers: _headers,
       body: json.encode({
         'recipient': 'all-admins',
         'message': message,
+        'parent_message_id': parentMessageId,
+        'parent_message_text': parentMessageText,
       }),
     ).timeout(const Duration(seconds: 15));
 
@@ -566,6 +572,23 @@ class ApiService {
       print('ApiService Error (fetchPrincipalReplies): $e');
     }
     return [];
+  }
+
+  /// Delete all messages and replies from the database.
+  Future<void> clearAllMessages() async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/messages/clear'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 15));
+
+    if (response.statusCode != 200) {
+      String errMsg = 'Failed to clear messages';
+      try {
+        final data = json.decode(response.body);
+        errMsg = data['message'] ?? data['error'] ?? errMsg;
+      } catch (_) {}
+      throw Exception('$errMsg (Status ${response.statusCode})');
+    }
   }
 
   int _toInt(dynamic value) => int.tryParse(value?.toString() ?? '0') ?? 0;
