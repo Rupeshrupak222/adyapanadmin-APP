@@ -530,7 +530,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     _loadReadMessageIds();
     if (widget.role == 'Principal' || widget.role == 'Teacher') {
       _fetchMessages();
-      _messageTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchMessages());
+      _messageTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchMessages());
       // Wire up notification tap → open inbox automatically
       NotificationService.instance.onNotificationTap = () {
         if (mounted) {
@@ -543,7 +543,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
       NotificationService.instance.registerToken();
     } else if (widget.role == 'Admin') {
       _fetchReplies();
-      _messageTimer = Timer.periodic(const Duration(seconds: 30), (_) => _fetchReplies());
+      _messageTimer = Timer.periodic(const Duration(seconds: 5), (_) => _fetchReplies());
       // Wire up notification tap for admin → open replies inbox
       NotificationService.instance.onNotificationTap = () {
         if (mounted) {

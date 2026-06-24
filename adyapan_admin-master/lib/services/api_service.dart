@@ -548,14 +548,16 @@ class ApiService {
   /// Admin fetches all replies sent by principals.
   Future<List<Map<String, dynamic>>> fetchPrincipalReplies({String? schoolId}) async {
     try {
-      final queryParam = schoolId != null ? '?schoolId=$schoolId' : '';
       final response = await http.get(
-        Uri.parse('$baseUrl/messages$queryParam'),
+        Uri.parse('$baseUrl/messages'),
         headers: _headers,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        if (data is Map && data['data'] != null) {
+          return List<Map<String, dynamic>>.from(data['data']['messages'] ?? []);
+        }
         if (data is List) {
           return List<Map<String, dynamic>>.from(data);
         }
