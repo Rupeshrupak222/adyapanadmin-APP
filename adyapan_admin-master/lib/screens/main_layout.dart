@@ -153,16 +153,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                         ),
                         Row(
                           children: [
-                            // Reply button for principals and teachers
-                            if (widget.role == 'Principal' || widget.role == 'Teacher')
-                              TextButton.icon(
-                                icon: const Icon(Icons.reply_rounded, size: 16, color: Color(0xFF4F46E5)),
-                                label: const Text(
-                                  'Reply',
-                                  style: TextStyle(fontSize: 12, color: Color(0xFF4F46E5), fontWeight: FontWeight.w700),
-                                ),
-                                onPressed: () => _showReplyDialog(context),
-                              ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
+                              tooltip: 'Clear All Messages',
+                              onPressed: () => _confirmClearAllMessages(context, setModalState),
+                            ),
                             IconButton(
                               icon: const Icon(Icons.close_rounded, color: Color(0xFF64748B)),
                               onPressed: () => Navigator.of(context).pop(),
@@ -219,7 +214,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                               final msgId = msg['id']?.toString() ?? '';
                               final titleText = msg['title']?.toString() ?? '📢 Admin Message';
                               final messageText = msg['message']?.toString() ?? msg['body']?.toString() ?? '';
-                              final dateStr = msg['sentAt']?.toString() ?? '';
+                              final dateStr = msg['sentAt']?.toString() ?? msg['created_at']?.toString() ?? msg['sent_at']?.toString() ?? '';
                               final isUnread = !_readMessageIds.contains(msgId);
 
                               String formattedTime = '';
@@ -286,17 +281,68 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                         height: 1.4,
                                       ),
                                     ),
-                                    if (formattedTime.isNotEmpty) ...[
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        formattedTime,
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFF94A3B8),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ],
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        if (formattedTime.isNotEmpty)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFF1F5F9),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.access_time_rounded, size: 12, color: Color(0xFF64748B)),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  formattedTime,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Color(0xFF64748B),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          )
+                                        else
+                                          const SizedBox.shrink(),
+                                        if (widget.role == 'Principal' || widget.role == 'Teacher')
+                                          InkWell(
+                                            onTap: () => _showReplyDialog(
+                                              context,
+                                              parentMessageId: msgId,
+                                              parentMessageText: messageText,
+                                            ),
+                                            borderRadius: BorderRadius.circular(6),
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.reply_rounded,
+                                                    size: 14,
+                                                    color: const Color(0xFF4F46E5),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  const Text(
+                                                    'Reply',
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      color: Color(0xFF4F46E5),
+                                                      fontWeight: FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               );
@@ -313,7 +359,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   }
 
   /// Principal sends a reply message back to the admin.
-  void _showReplyDialog(BuildContext parentContext) {
+  void _showReplyDialog(
+    BuildContext parentContext, {
+    String? parentMessageId,
+    String? parentMessageText,
+  }) {
     final replyController = TextEditingController();
     bool isSending = false;
 
@@ -363,16 +413,16 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           child: const Icon(Icons.reply_rounded, color: Colors.white, size: 18),
                         ),
                         const SizedBox(width: 10),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Reply to Admin', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
+                              const Text('Reply to Admin', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
                               Text(
                                 widget.role == 'Teacher'
                                     ? 'Your message will be sent to the Adyapan Admin'
                                     : 'Your message will be sent to the Adyapan Admin',
-                                style: TextStyle(color: Colors.white70, fontSize: 11),
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
                               ),
                             ],
                           ),
@@ -390,6 +440,35 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (parentMessageText != null && parentMessageText.isNotEmpty) ...[
+                          const Text(
+                            'Replying to:',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: const Border(
+                                left: BorderSide(color: Color(0xFF64748B), width: 3),
+                              ),
+                            ),
+                            child: Text(
+                              parentMessageText,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF475569),
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
                         const Text(
                           'Your Message',
                           style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
@@ -435,7 +514,11 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                     }
                                     setDialogState(() => isSending = true);
                                     try {
-                                      await ApiService.instance.sendPrincipalReply(msg);
+                                      await ApiService.instance.sendPrincipalReply(
+                                        msg,
+                                        parentMessageId: parentMessageId,
+                                        parentMessageText: parentMessageText,
+                                      );
                                       if (ctx.mounted) Navigator.of(ctx).pop();
                                       if (parentContext.mounted) {
                                         ScaffoldMessenger.of(parentContext).showSnackBar(
@@ -610,6 +693,64 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
   // ── ADMIN MESSAGING SYSTEM ──────────────────────────────────────────────────
 
+  Future<void> _confirmClearAllMessages(BuildContext context, StateSetter setModalState) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('Clear All Messages', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to delete all recent messages and replies from the database? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Clear All', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await ApiService.instance.clearAllMessages();
+        setModalState(() {
+          _adminMessages.clear();
+          _principalReplies.clear();
+        });
+        setState(() {
+          _adminMessages = [];
+          _principalReplies = [];
+        });
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('All messages and replies cleared successfully.')),
+          );
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error clearing messages: $e')),
+          );
+        }
+      }
+    }
+  }
+
   /// Shows admin the inbox of all replies received from principals.
   void _showAdminRepliesInbox(BuildContext context) {
     _fetchReplies(); // refresh on open
@@ -649,9 +790,18 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           ),
                         ],
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, color: Color(0xFF64748B)),
-                        onPressed: () => Navigator.of(ctx).pop(),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.delete_sweep_rounded, color: Colors.redAccent),
+                            tooltip: 'Clear All Messages',
+                            onPressed: () => _confirmClearAllMessages(ctx, setModalState),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: Color(0xFF64748B)),
+                            onPressed: () => Navigator.of(ctx).pop(),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -686,10 +836,39 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (context, index) {
                             final reply = _principalReplies[index];
-                            final titleText = reply['title']?.toString() ?? '📩 Principal Reply';
                             final messageText = reply['message']?.toString() ?? '';
                             final fromEmail = reply['from_email']?.toString() ?? '';
-                            final dateStr = reply['sentAt']?.toString() ?? '';
+                            final dateStr = reply['sentAt']?.toString() ?? reply['created_at']?.toString() ?? reply['sent_at']?.toString() ?? '';
+                            final parentMsgText = reply['parent_message_text']?.toString();
+
+                            // sender_name contains the full label:
+                            // "Niranjan – Principal (ABC School)" or "Ramesh – Teacher (XYZ School)"
+                            final rawSenderName = (reply['sender_name']?.toString() ?? '').trim();
+
+                            String displayName = rawSenderName;
+                            String schoolName = '';
+                            String roleName = rawSenderName.toLowerCase().contains('teacher') ? 'Teacher' : 'Principal';
+
+                            // Parse "Name – Role (School)" format
+                            if (rawSenderName.contains('(') && rawSenderName.contains(')')) {
+                              try {
+                                final startIdx = rawSenderName.indexOf('(');
+                                final endIdx = rawSenderName.lastIndexOf(')');
+                                schoolName = rawSenderName.substring(startIdx + 1, endIdx).trim();
+                                displayName = rawSenderName.substring(0, startIdx).trim();
+                                if (displayName.contains('–')) {
+                                  displayName = displayName.split('–').first.trim();
+                                }
+                              } catch (_) {}
+                            } else if (rawSenderName.contains('–')) {
+                              // "Name – Role" without school
+                              displayName = rawSenderName.split('–').first.trim();
+                            }
+
+                            // Fallback: if sender_name is empty/generic, use email
+                            if (displayName.isEmpty || displayName.toLowerCase().contains('reply')) {
+                              displayName = fromEmail.isNotEmpty ? fromEmail.split('@').first : 'Unknown';
+                            }
 
                             String formattedTime = '';
                             if (dateStr.isNotEmpty) {
@@ -712,6 +891,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Container(
                                         padding: const EdgeInsets.all(6),
@@ -726,47 +906,157 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            Text(
-                                              titleText,
-                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: Color(0xFF0F172A)),
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.center,
+                                              children: [
+                                                Flexible(
+                                                  child: Text(
+                                                    displayName,
+                                                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF0F172A)),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                  decoration: BoxDecoration(
+                                                    color: roleName == 'Teacher'
+                                                        ? const Color(0xFF8B5CF6).withOpacity(0.12)
+                                                        : const Color(0xFF3B82F6).withOpacity(0.12),
+                                                    borderRadius: BorderRadius.circular(6),
+                                                  ),
+                                                  child: Text(
+                                                    roleName,
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: roleName == 'Teacher' ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                                                      fontWeight: FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                            // Role badge derived from title
-                                            if (titleText.toLowerCase().contains('teacher'))
-                                              Container(
-                                                margin: const EdgeInsets.only(top: 3),
-                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: const Color(0xFF8B5CF6).withOpacity(0.12),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: const Text('Teacher', style: TextStyle(fontSize: 10, color: Color(0xFF7C3AED), fontWeight: FontWeight.w700)),
-                                              )
-                                            else
-                                              Container(
-                                                margin: const EdgeInsets.only(top: 3),
-                                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: const Color(0xFF3B82F6).withOpacity(0.12),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: const Text('Principal', style: TextStyle(fontSize: 10, color: Color(0xFF2563EB), fontWeight: FontWeight.w700)),
+                                            if (schoolName.isNotEmpty) ...[
+                                              const SizedBox(height: 3),
+                                              Row(
+                                                children: [
+                                                  const Icon(Icons.school_outlined, size: 11, color: Color(0xFF64748B)),
+                                                  const SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      schoolName,
+                                                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
+                                            ],
                                           ],
                                         ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 8),
+                                  if (parentMsgText != null && parentMsgText.isNotEmpty) ...[
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      margin: const EdgeInsets.only(bottom: 10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.6),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: const Border(
+                                          left: BorderSide(color: Color(0xFF94A3B8), width: 3),
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text(
+                                            'In response to:',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            parentMsgText,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFF475569),
+                                              fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                   Text(messageText, style: const TextStyle(fontSize: 13.5, color: Color(0xFF334155), height: 1.4)),
-                                  if (fromEmail.isNotEmpty || formattedTime.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
+                                  if (fromEmail.isNotEmpty || formattedTime.isNotEmpty || schoolName.isNotEmpty) ...[
+                                    const SizedBox(height: 12),
                                     Row(
                                       children: [
                                         if (fromEmail.isNotEmpty)
-                                          Text(fromEmail, style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                                          Text(
+                                            fromEmail,
+                                            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280), fontWeight: FontWeight.w500),
+                                          ),
                                         const Spacer(),
+                                        if (schoolName.isNotEmpty) ...[
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFDCFCE7),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: const Color(0xFF86EFAC)),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.school_rounded, size: 12, color: Color(0xFF15803D)),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  schoolName.toUpperCase(),
+                                                  style: const TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: Color(0xFF15803D),
+                                                    letterSpacing: 0.3,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                        ],
                                         if (formattedTime.isNotEmpty)
-                                          Text(formattedTime, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFE8F5E9),
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.access_time_rounded, size: 12, color: Color(0xFF2E7D32)),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  formattedTime,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    color: Color(0xFF2E7D32),
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                       ],
                                     ),
                                   ],
