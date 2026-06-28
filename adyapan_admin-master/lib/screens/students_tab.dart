@@ -67,7 +67,16 @@ class _StudentsTabState extends State<StudentsTab> {
     final formKey = GlobalKey<FormState>();
 
     final nameController = TextEditingController(text: student?.name ?? '');
-    final gradeController = TextEditingController(text: student?.gradeClass ?? 'Grade 10-A');
+    // Determine initial selected grade
+    String _selectedGrade = () {
+      final raw = student?.gradeClass?.trim() ?? '';
+      if (raw.isEmpty) return 'Class 1';
+      if (raw.toLowerCase().startsWith('class')) return raw;
+      final num = int.tryParse(raw);
+      if (num != null && num >= 1 && num <= 12) return 'Class $num';
+      return 'Class 1';
+    }();
+    final gradeController = TextEditingController(text: _selectedGrade);
     final rollController = TextEditingController(text: student?.rollNo ?? '');
     final lessonsController = TextEditingController(text: student != null ? student.lessonsCompleted.toString() : '0');
     final questsController = TextEditingController(text: student != null ? student.questsCompleted.toString() : '0');
@@ -101,7 +110,46 @@ class _StudentsTabState extends State<StudentsTab> {
                 Row(
                   children: [
                     Expanded(
-                      child: _buildFormField(controller: gradeController, label: 'Grade/Class', hint: 'e.g. Grade 10-A'),
+                      child: StatefulBuilder(
+                        builder: (ctx, setDropState) {
+                          const classOptions = [
+                            'Class 1', 'Class 2', 'Class 3', 'Class 4',
+                            'Class 5', 'Class 6', 'Class 7', 'Class 8',
+                            'Class 9', 'Class 10', 'Class 11', 'Class 12',
+                          ];
+                          return DropdownButtonFormField<String>(
+                            value: _selectedGrade,
+                            dropdownColor: const Color(0xFF1E293B),
+                            style: const TextStyle(color: Colors.white, fontSize: 14),
+                            decoration: InputDecoration(
+                              labelText: 'Grade/Class',
+                              labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                              filled: true,
+                              fillColor: Colors.white.withOpacity(0.04),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: Color(0xFF6366F1)),
+                              ),
+                            ),
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF94A3B8)),
+                            items: classOptions.map((c) => DropdownMenuItem(
+                              value: c,
+                              child: Text(c, style: const TextStyle(color: Colors.white)),
+                            )).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setDropState(() { _selectedGrade = val; });
+                                gradeController.text = val;
+                              }
+                            },
+                            validator: (val) => val == null ? 'Select a class' : null,
+                          );
+                        },
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(

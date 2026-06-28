@@ -259,19 +259,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(10),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFE0E7FF),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: const Color(0xFFC7D2FE),
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.school_rounded,
-                                        color: Color(0xFF4F46E5),
-                                        size: 28,
+                                    ClipOval(
+                                      child: Image.asset(
+                                        'assets/app_icon.jpg',
+                                        width: 52,
+                                        height: 52,
+                                        fit: BoxFit.cover,
                                       ),
                                     ),
                                     const SizedBox(width: 14),

@@ -1982,16 +1982,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
               color: Colors.transparent,
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.school_rounded,
-                      color: Color(0xFF4F46E5),
-                      size: 24,
+                  ClipOval(
+                    child: Image.asset(
+                      'assets/app_icon.jpg',
+                      width: 44,
+                      height: 44,
+                      fit: BoxFit.cover,
                     ),
                   ),
                   const SizedBox(width: 14),
@@ -2249,19 +2245,12 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF6366F1).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: const Color(0xFF6366F1).withOpacity(0.3),
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.school_rounded,
-                    color: Color(0xFF4F46E5),
-                    size: 24,
+                ClipOval(
+                  child: Image.asset(
+                    'assets/app_icon.jpg',
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
                   ),
                 ),
                 const SizedBox(width: 14),

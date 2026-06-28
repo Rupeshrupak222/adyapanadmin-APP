@@ -431,34 +431,24 @@ class _OverviewTabState extends State<OverviewTab> {
                     })
                 .toList();
             
-            // Build available classes list dynamically
-            final List<String> availableClasses = ['All Classes'];
-            for (var st in rawStudents) {
-              final cls = st['class']?.toString() ?? '';
-              if (cls.isNotEmpty && !availableClasses.contains(cls)) {
-                availableClasses.add(cls);
-              }
-            }
-            // Sort classes so they appear in beautiful ordered format (Class 1, Class 2...)
-            availableClasses.sort((a, b) {
-              if (a == 'All Classes') return -1;
-              if (b == 'All Classes') return 1;
-              
-              try {
-                final aNum = int.parse(a.split(' ')[1].split('-')[0]);
-                final bNum = int.parse(b.split(' ')[1].split('-')[0]);
-                if (aNum != bNum) return aNum.compareTo(bNum);
-              } catch (_) {}
-              return a.compareTo(b);
-            });
- 
+            // Fixed Class 1-12 dropdown (always shown regardless of what's in DB)
+            const List<String> availableClasses = [
+              'All Classes',
+              'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6',
+              'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12',
+            ];
+
             // Filter students by search query AND class filter
+            // Normalise stored class value: "3" -> "Class 3", "Class 3" stays as-is
             final filteredStudents = rawStudents.where((st) {
               final name = (st['name'] ?? '').toString().toLowerCase();
               final matchesSearch = name.contains(searchQuery.toLowerCase());
               
-              final cls = st['class']?.toString() ?? '';
-              final matchesClass = selectedClassFilter == 'All Classes' || cls == selectedClassFilter;
+              final raw = st['class']?.toString().trim() ?? '';
+              final normalised = raw.isEmpty ? '' :
+                  raw.toLowerCase().startsWith('class') ? raw : 'Class $raw';
+              final matchesClass = selectedClassFilter == 'All Classes' ||
+                  normalised.toLowerCase() == selectedClassFilter.toLowerCase();
               
               return matchesSearch && matchesClass;
             }).toList();
@@ -2367,6 +2357,11 @@ class _OverviewTabState extends State<OverviewTab> {
   void _showConnectionsSchoolDetailDialog(BuildContext context, Map<String, dynamic> school) {
     final searchController = TextEditingController();
     String filter = 'All'; // 'All', 'Teachers', 'Students'
+    String selectedClass = 'All'; // 'All', 'Class 1' … 'Class 12'
+    const classOptions = [
+      'All', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6',
+      'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12',
+    ];
 
     showDialog(
       context: context,
@@ -2402,8 +2397,13 @@ class _OverviewTabState extends State<OverviewTab> {
             if (filter == 'All' || filter == 'Students') {
               for (final s in schoolStudents) {
                 final name = s.name ?? '';
-                if (query.isEmpty || name.toLowerCase().contains(query)) {
-                  items.add({'type': 'student', 'name': name, 'class': s.gradeClass ?? '', 'data': s});
+                final cls = s.gradeClass ?? '';
+                // normalise stored class value to match chip label format
+                final normalised = cls.trim().isEmpty ? '' :
+                    cls.toLowerCase().startsWith('class') ? cls.trim() : 'Class $cls'.trim();
+                final matchesClass = selectedClass == 'All' || normalised.toLowerCase() == selectedClass.toLowerCase();
+                if (matchesClass && (query.isEmpty || name.toLowerCase().contains(query))) {
+                  items.add({'type': 'student', 'name': name, 'class': cls, 'data': s});
                 }
               }
             }
@@ -2508,19 +2508,58 @@ class _OverviewTabState extends State<OverviewTab> {
                       ],
                     ),
                   ),
-                  // Filter chips
+                  // Main filter chips (All / Teachers / Students)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
                     child: Row(
                       children: [
-                        _filterChip('All', filter, () => setStateDialog(() { filter = 'All'; })),
+                        _filterChip('All', filter, () => setStateDialog(() { filter = 'All'; selectedClass = 'All'; })),
                         const SizedBox(width: 8),
-                        _filterChip('Teachers', filter, () => setStateDialog(() { filter = 'Teachers'; })),
+                        _filterChip('Teachers', filter, () => setStateDialog(() { filter = 'Teachers'; selectedClass = 'All'; })),
                         const SizedBox(width: 8),
                         _filterChip('Students', filter, () => setStateDialog(() { filter = 'Students'; })),
                       ],
                     ),
                   ),
+                  // Class filter row — visible only when students are included
+                  if (filter == 'All' || filter == 'Students')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                      child: SizedBox(
+                        height: 34,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: classOptions.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 6),
+                          itemBuilder: (_, i) {
+                            final cls = classOptions[i];
+                            final isSelected = selectedClass == cls;
+                            return GestureDetector(
+                              onTap: () => setStateDialog(() { selectedClass = cls; }),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: isSelected ? const Color(0xFF10B981) : Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE2E8F0),
+                                  ),
+                                ),
+                                child: Text(
+                                  cls,
+                                  style: TextStyle(
+                                    color: isSelected ? Colors.white : const Color(0xFF475569),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
                   const Divider(color: Color(0xFFE2E8F0), height: 1),
                   // Content list
                   Flexible(
