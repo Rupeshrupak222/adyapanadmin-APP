@@ -8,6 +8,8 @@ import 'teachers_tab.dart';
 import 'students_tab.dart';
 import 'supervision_tab.dart';
 import 'meeting_tab.dart';
+import 'messages_tab.dart';
+
 import '../services/data_service.dart';
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
@@ -35,8 +37,36 @@ class MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
-  late final List<Widget> _tabs;
+  List<Widget> get _tabs => [
+        OverviewTab(
+          role: widget.role,
+          schoolData: widget.schoolData,
+          displayName: widget.displayName,
+        ),
+        TeachersTab(role: widget.role, schoolData: widget.schoolData),
+        StudentsTab(role: widget.role, schoolData: widget.schoolData),
+        if (widget.role == 'Principal')
+          MessagesTab(
+            messages: _adminMessages,
+            readMessageIds: _readMessageIds,
+            onRefresh: () async {
+              await _fetchMessages();
+              if (mounted) setState(() {});
+            },
+            onReply: (msgId, text) {
+              _showReplyDialog(context, parentMessageId: msgId, parentMessageText: text);
+            },
+            onComposeNew: () {
+              _showReplyDialog(context);
+            },
+          ),
+        if (widget.role == 'Admin' || widget.role == 'Principal') ...[
+          MeetingTab(role: widget.role, schoolData: widget.schoolData),
+          SupervisionTab(role: widget.role),
+        ],
+      ];
   late final List<Map<String, dynamic>> _navigationItems;
+
 
   List<Map<String, dynamic>> _adminMessages = [];
   Set<String> _readMessageIds = {};
@@ -417,7 +447,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Reply to Admin', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
+                              Text(parentMessageId == null ? 'Message to Admin' : 'Reply to Admin', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w800)),
                               Text(
                                 widget.role == 'Teacher'
                                     ? 'Your message will be sent to the Adyapan Admin'
@@ -522,9 +552,9 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                                       if (ctx.mounted) Navigator.of(ctx).pop();
                                       if (parentContext.mounted) {
                                         ScaffoldMessenger.of(parentContext).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('✅ Reply sent to admin!'),
-                                            backgroundColor: Color(0xFF10B981),
+                                          SnackBar(
+                                            content: Text(parentMessageId == null ? '✅ Message sent to admin!' : '✅ Reply sent to admin!'),
+                                            backgroundColor: const Color(0xFF10B981),
                                             behavior: SnackBarBehavior.floating,
                                           ),
                                         );
@@ -574,41 +604,23 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    _tabs = [
-      OverviewTab(
-        role: widget.role,
-        schoolData: widget.schoolData,
-        displayName: widget.displayName,
-      ),
-      TeachersTab(role: widget.role, schoolData: widget.schoolData),
-      StudentsTab(role: widget.role, schoolData: widget.schoolData),
-      SupervisionTab(role: widget.role),
+    _navigationItems = [
+      {'title': 'Overview', 'icon': Icons.dashboard_rounded},
+      {'title': 'Teachers Directory', 'icon': Icons.co_present_rounded},
+      {'title': 'Students Directory', 'icon': Icons.school_rounded},
     ];
 
-    // Footer navigation items (Supervision moved to drawer for Admin)
-    if (widget.role == 'Admin') {
-      _navigationItems = [
-        {'title': 'Overview', 'icon': Icons.dashboard_rounded},
-        {'title': 'Teachers Directory', 'icon': Icons.co_present_rounded},
-        {'title': 'Students Directory', 'icon': Icons.school_rounded},
-        // Index 3 = Messages (special button, not a tab)
-      ];
-    } else {
-      _navigationItems = [
-        {'title': 'Overview', 'icon': Icons.dashboard_rounded},
-        {'title': 'Teachers Directory', 'icon': Icons.co_present_rounded},
-        {'title': 'Students Directory', 'icon': Icons.school_rounded},
-        {'title': 'Supervision Panel', 'icon': Icons.analytics_rounded},
-      ];
+    if (widget.role == 'Principal') {
+      _navigationItems.add({'title': 'Message', 'icon': Icons.message_rounded});
     }
 
     if (widget.role == 'Admin' || widget.role == 'Principal') {
-      _tabs.add(MeetingTab(role: widget.role, schoolData: widget.schoolData));
       _navigationItems.add({
         'title': 'Take Meeting',
         'icon': Icons.groups_rounded,
       });
     }
+
 
     _loadReadMessageIds();
     if (widget.role == 'Principal' || widget.role == 'Teacher') {
@@ -2135,16 +2147,16 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                     );
                   }),
 
-                  // Supervision Panel (drawer-only for Admin)
-                  if (isAdmin)
+                  // Supervision Panel (drawer-only for Admin & Principal)
+                  if (isAdmin || isPrincipal)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                       child: Material(
-                        color: _selectedIndex == 3 ? const Color(0xFF4F46E5) : Colors.transparent,
+                        color: _selectedIndex == (isAdmin ? 4 : 5) ? const Color(0xFF4F46E5) : Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
                           onTap: () {
-                            setState(() => _selectedIndex = 3);
+                            setState(() => _selectedIndex = (isAdmin ? 4 : 5));
                             Navigator.of(context).pop();
                           },
                           borderRadius: BorderRadius.circular(12),
@@ -2154,16 +2166,16 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                               children: [
                                 Icon(
                                   Icons.analytics_rounded,
-                                  color: _selectedIndex == 3 ? Colors.white : const Color(0xFF475569),
+                                  color: _selectedIndex == (isAdmin ? 4 : 5) ? Colors.white : const Color(0xFF475569),
                                   size: 20,
                                 ),
                                 const SizedBox(width: 16),
                                 Text(
                                   'Supervision Panel',
                                   style: TextStyle(
-                                    color: _selectedIndex == 3 ? Colors.white : const Color(0xFF475569),
+                                    color: _selectedIndex == (isAdmin ? 4 : 5) ? Colors.white : const Color(0xFF475569),
                                     fontSize: 14,
-                                    fontWeight: _selectedIndex == 3 ? FontWeight.w700 : FontWeight.w500,
+                                    fontWeight: _selectedIndex == (isAdmin ? 4 : 5) ? FontWeight.w700 : FontWeight.w500,
                                   ),
                                 ),
                               ],
@@ -2359,49 +2371,88 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
           // Sidebar Navigation Items
           Expanded(
-            child: ListView.builder(
-              itemCount: _navigationItems.length,
-              itemBuilder: (context, index) {
-                final item = _navigationItems[index];
-                final isSelected = _selectedIndex == index;
+            child: ListView(
+              children: [
+                ..._navigationItems.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final item = entry.value;
+                  final isSelected = _selectedIndex == index;
 
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Material(
-                    color: isSelected ? const Color(0xFF4F46E5) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
-                    child: InkWell(
-                      onTap: () {
-                        setState(() {
-                          _selectedIndex = index;
-                        });
-                      },
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Material(
+                      color: isSelected ? const Color(0xFF4F46E5) : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        child: Row(
-                          children: [
-                            Icon(
-                              item['icon'],
-                              color: isSelected ? Colors.white : const Color(0xFF475569),
-                              size: 20,
-                            ),
-                            const SizedBox(width: 16),
-                            Text(
-                              item['title'],
-                              style: TextStyle(
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedIndex = index;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: Row(
+                            children: [
+                              Icon(
+                                item['icon'],
                                 color: isSelected ? Colors.white : const Color(0xFF475569),
-                                fontSize: 14,
-                                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                size: 20,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 16),
+                              Text(
+                                item['title'],
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : const Color(0xFF475569),
+                                  fontSize: 14,
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                if (widget.role == 'Admin' || widget.role == 'Principal')
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Material(
+                      color: _selectedIndex == (widget.role == 'Admin' ? 4 : 5) ? const Color(0xFF4F46E5) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        onTap: () {
+                          setState(() {
+                            _selectedIndex = widget.role == 'Admin' ? 4 : 5;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.analytics_rounded,
+                                color: _selectedIndex == (widget.role == 'Admin' ? 4 : 5) ? Colors.white : const Color(0xFF475569),
+                                size: 20,
+                              ),
+                              const SizedBox(width: 16),
+                              Text(
+                                'Supervision Panel',
+                                style: TextStyle(
+                                  color: _selectedIndex == (widget.role == 'Admin' ? 4 : 5) ? Colors.white : const Color(0xFF475569),
+                                  fontSize: 14,
+                                  fontWeight: _selectedIndex == (widget.role == 'Admin' ? 4 : 5) ? FontWeight.w700 : FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                );
-              },
+              ],
             ),
           ),
         ],
@@ -2430,7 +2481,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                 const SizedBox(width: 8),
               ],
               Text(
-                _navigationItems[_selectedIndex]['title'],
+                _getAppBarTitle(),
                 style: const TextStyle(
                   color: Color(0xFF0F172A),
                   fontSize: 18,
@@ -2522,5 +2573,18 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  String _getAppBarTitle() {
+    if (widget.role == 'Admin' && _selectedIndex == 4) {
+      return 'Supervision Panel';
+    }
+    if (widget.role == 'Principal' && _selectedIndex == 5) {
+      return 'Supervision Panel';
+    }
+    if (_selectedIndex >= 0 && _selectedIndex < _navigationItems.length) {
+      return _navigationItems[_selectedIndex]['title'].toString();
+    }
+    return 'Adyapan';
   }
 }
