@@ -1863,8 +1863,8 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           ),
         ),
         bottomNavigationBar: !isDesktop
-            ? widget.role == 'Admin'
-                ? _buildAdminBottomBar()
+            ? (widget.role == 'Admin' || widget.role == 'Principal')
+                ? _buildRoleBottomBar()
                 : BottomNavigationBar(
                     currentIndex: _selectedIndex >= 4 ? 0 : _selectedIndex,
                     onTap: (index) {
@@ -1892,13 +1892,17 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
     );
   }
 
-  /// Custom bottom bar for Admin: Overview, Teachers, Students + center Message FAB
-  Widget _buildAdminBottomBar() {
+  /// Custom bottom bar for Admin & Principal: Overview, Teachers, Students + custom Message FAB
+  Widget _buildRoleBottomBar() {
+    final isAdmin = widget.role == 'Admin';
     const barItems = [
       {'index': 0, 'title': 'Overview', 'icon': Icons.dashboard_rounded},
       {'index': 1, 'title': 'Teachers', 'icon': Icons.co_present_rounded},
       {'index': 2, 'title': 'Students', 'icon': Icons.school_rounded},
     ];
+
+    final isMessageSelected = !isAdmin && _selectedIndex == 3;
+
     return Container(
       height: 72,
       decoration: const BoxDecoration(
@@ -1938,27 +1942,48 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
           // Message center button
           Expanded(
             child: InkWell(
-              onTap: _showAdminMessageDialog,
+              onTap: () {
+                if (isAdmin) {
+                  _showAdminMessageDialog();
+                } else {
+                  setState(() => _selectedIndex = 3);
+                }
+              },
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
                     width: 42,
                     height: 42,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFF4F46E5), Color(0xFF6366F1)],
+                        colors: isMessageSelected
+                            ? [const Color(0xFF10B981), const Color(0xFF059669)]
+                            : [const Color(0xFF4F46E5), const Color(0xFF6366F1)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
                       shape: BoxShape.circle,
+                      boxShadow: isMessageSelected
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF10B981).withOpacity(0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              )
+                            ]
+                          : null,
                     ),
                     child: const Icon(Icons.message_rounded, color: Colors.white, size: 20),
                   ),
                   const SizedBox(height: 1),
-                  const Text(
+                  Text(
                     'Message',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF4F46E5)),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: isMessageSelected ? const Color(0xFF059669) : const Color(0xFF4F46E5),
+                    ),
                   ),
                 ],
               ),
